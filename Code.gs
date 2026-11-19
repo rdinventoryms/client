@@ -36,6 +36,9 @@ function action(name, token, data) {
       case 'dashboard': return { ok: true, data: dashboard_(tenant) };
       case 'asset': return { ok: true, data: readAsset_(tenant, data) };
       case 'savePart': return { ok: true, data: locked_(() => savePart_(tenant, data)) };
+      case 'editPartInfo': return { ok: true, data: locked_(() => editPartInfo_(tenant, data)) };
+      case 'restockPart': return { ok: true, data: locked_(() => restockPart_(tenant, data)) };
+      case 'setPartOpeningCost': return { ok: true, data: locked_(() => setPartOpeningCost_(tenant, data)) };
       case 'purchaseHistory': return { ok: true, data: purchaseHistory_(tenant, data.id) };
       case 'savePackage': return { ok: true, data: locked_(() => savePackage_(tenant, data)) };
       case 'saveBrand': return { ok: true, data: locked_(() => saveBrand_(tenant, data)) };
@@ -322,11 +325,9 @@ function prorate_(value, stock, quantity) {
   return Math.floor(value / stock) * quantity + Math.round((value % stock) * quantity / stock);
 }
 
-function purchase_(data, supplier) {
-  if (!data) return null;
+function purchase_(data) {
+  if (!data || !['Bulk', 'Per Item'].includes(data.type)) fail_('Choose Bulk or Per Item.');
   if (!UUID.test(String(data.key))) fail_('Invalid purchase reference.');
-  if (!supplier) fail_('Enter a supplier name for the purchase.');
-  if (!['Bulk', 'Per Piece'].includes(data.type)) fail_('Choose Bulk or Per Piece.');
   const quantity = integer_(data.quantity, 'Purchase quantity', 1000000, 1);
   const price = integer_(data.price, 'Purchase price in centavos', data.type === 'Bulk' ? 1000000000000000 : 1000000000);
   const value = data.type === 'Bulk' ? price : price * quantity;
@@ -334,37 +335,78 @@ function purchase_(data, supplier) {
 }
 
 function savePart_(tenant, data) {
+  if (data.id) fail_('Refresh the app and choose Edit Part Info or Restock.');
   const sheet = book_(tenant.sheetId);
-  const tab = sheet.tab('Parts');
   const supplier = text_(data.supplier, 'supplier name', 120, false);
-  const receipt = purchase_(data.purchase, supplier);
-  if (receipt && values_(sheet, 'Purchases!P2:P').some(([key]) => key === receipt.key)) {
-    return dashboard_(tenant);
-  }
-  const records = parts_(sheet);
-  const previous = records.find(part => part.id === data.id);
-  if (data.id && (!previous || previous.revision !== data.revision)) fail_('The part changed. Reopen it and try again.', 'STALE');
+  const receipt = data.purchase ? purchase_(data.purchase) : null;
+  if (receipt && !supplier) fail_('Enter a supplier name for the purchase.');
+  if (receipt && receiptExists_(sheet, receipt.key)) return dashboard_(tenant);
   const sku = text_(data.sku, 'SKU', 40).toUpperCase();
-  if (records.some(part => part.sku === sku && part.id !== data.id)) fail_('This SKU is already in use.');
+  if (parts_(sheet).some(part => part.sku === sku)) fail_('This SKU is already in use.');
   const name = text_(data.name, 'part name', 100);
-  const id = previous?.id || Utilities.getUuid();
-  const before = integer_(data.stock, 'On hand before purchase', 1000000);
+  const stock = integer_(data.stock, 'On hand', 1000000);
   const threshold = integer_(data.threshold, 'Low-stock threshold', 1000000);
-  let beforeValue = prorate_(previous?.stockValue ?? null, previous?.stock ?? 0, before);
-  if (before && beforeValue === null && data.openingCost != null) {
-    beforeValue = integer_(data.openingCost, 'Opening unit cost in centavos', 1000000000) * before;
-  }
-  if (receipt && beforeValue === null) fail_('Enter the opening unit cost for the remaining stock before logging a purchase.');
+  const stockValue = !stock ? 0 : data.openingCost == null ? null : openingValue_(data.openingCost, stock);
+  writePart_(sheet, { id: Utilities.getUuid(), sku, name, stock, threshold, supplier, stockValue, revision: 0 }, receipt);
+  return dashboard_(tenant);
+}
+
+function currentPart_(sheet, data) {
+  const part = parts_(sheet).find(item => item.id === data.id);
+  if (!part || part.revision !== data.revision) fail_('The part changed. Reopen it and try again.', 'STALE');
+  return part;
+}
+
+function editPartInfo_(tenant, data) {
+  const sheet = book_(tenant.sheetId);
+  const part = currentPart_(sheet, data);
+  const stock = integer_(data.stock, 'On hand', 1000000);
+  writePart_(sheet, {
+    ...part,
+    name: text_(data.name, 'part name', 100),
+    threshold: integer_(data.threshold, 'Low-stock threshold', 1000000),
+    stock, stockValue: prorate_(part.stockValue, part.stock, stock),
+  }, null);
+  return dashboard_(tenant);
+}
+
+function restockPart_(tenant, data) {
+  const sheet = book_(tenant.sheetId);
+  const receipt = purchase_(data.purchase);
+  if (receiptExists_(sheet, receipt.key)) return dashboard_(tenant);
+  writePart_(sheet, currentPart_(sheet, data), receipt);
+  return dashboard_(tenant);
+}
+
+function setPartOpeningCost_(tenant, data) {
+  const sheet = book_(tenant.sheetId);
+  const part = currentPart_(sheet, data);
+  if (!part.stock || part.stockValue !== null) fail_('Only existing stock without a recorded value needs an opening cost.');
+  writePart_(sheet, { ...part, stockValue: openingValue_(data.openingCost, part.stock) }, null);
+  return dashboard_(tenant);
+}
+
+function openingValue_(unitCost, stock) {
+  return integer_(unitCost, 'Opening unit cost in centavos', 1000000000) * stock;
+}
+
+function receiptExists_(sheet, key) {
+  return values_(sheet, 'Purchases!P2:P').some(([existing]) => existing === key);
+}
+
+function writePart_(sheet, part, receipt) {
+  const { id, sku, name, supplier, threshold, revision, index, stock: before, stockValue: beforeValue } = part;
+  if (receipt && beforeValue === null) fail_('Set an opening unit cost for the remaining stock before restocking.');
   const stock = integer_(before + (receipt?.quantity || 0), 'Resulting stock', 1000000);
   const value = receipt ? beforeValue + receipt.value : beforeValue;
   if (value !== null) integer_(value, 'Resulting stock value in centavos', 1000000000000000);
-  const row = [id, sku, name, stock, threshold, (previous?.revision || 0) + 1, supplier, value ?? ''];
-  const requests = [previous ? update_(tab, previous.index, 0, [row]) : append_(tab, [row])];
+  const tab = sheet.tab('Parts');
+  const row = [id, sku, name, stock, threshold, revision + 1, supplier, value ?? ''];
+  const requests = [index ? update_(tab, index, 0, [row]) : append_(tab, [row])];
   if (receipt) requests.push(append_(sheet.tab('Purchases'), [[Utilities.getUuid(), new Date().toISOString(),
     id, sku, name, supplier, receipt.type, receipt.quantity, receipt.value, receipt.unitCost, before, beforeValue,
     stock, value, value / stock, receipt.key]]));
   write_(sheet, requests);
-  return dashboard_(tenant);
 }
 
 function purchaseHistory_(tenant, id) {
@@ -372,7 +414,8 @@ function purchaseHistory_(tenant, id) {
   const sheet = book_(tenant.sheetId);
   if (!parts_(sheet).some(part => part.id === id)) fail_('Part not found.');
   return rows_(sheet, 'Purchases').filter(row => row[2] === id).slice(-100).reverse().map(row => ({
-    date: row[1], supplier: row[5], type: row[6], quantity: row[7], total: row[8], unitCost: row[9],
+    date: row[1], supplier: row[5] || 'Supplier not recorded', type: row[6] === 'Per Piece' ? 'Per Item' : row[6],
+    quantity: row[7], total: row[8], unitCost: row[9],
     averageCost: row[14],
   }));
 }

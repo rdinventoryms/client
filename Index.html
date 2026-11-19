@@ -212,7 +212,7 @@
           '<tr><td>'+safe(part.sku)+'</td><td>'+safe(part.name)+'</td><td>'+part.stock+'</td><td>'+safe(part.supplier || '—')+
           '</td><td>'+(part.stock && part.averageCost == null?'Uncosted':unitMoney(part.averageCost))+'</td><td><span class="badge'+
           (part.stock<=part.threshold?' off':'')+'">'+(part.stock===0?'Out of stock':part.stock<=part.threshold?'Low stock':'In stock')+
-          '</span></td><td><div class="actions">'+button('Edit','editPart',part.id)+button('Price history','purchaseHistory',part.id)+'</div></td></tr>').join('')+
+          '</span></td><td><div class="actions">'+button('Edit Part','editPart',part.id)+button('Price history','purchaseHistory',part.id)+'</div></td></tr>').join('')+
         '</tbody></table></div>':'<p class="surface empty">Add your first inventory part to track stock.</p>');
     }
 
@@ -228,24 +228,77 @@
         '<p class="muted small">JPEG, PNG, or WebP attachments up to 1 MB each.</p><div><button class="btn">Save branding</button></div></form>';
     }
 
-    function editPart(id) {
-      const part=state.data.parts.find(item=>item.id===id);
-      show(part?'Edit part':'Add part','<form data-form="savePart" class="stack" data-id="'+safe(id)+'" data-revision="'+(part?.revision||'')+'">'+
-        '<label>Part name<input name="name" maxlength="100" value="'+safe(part?.name)+'" required></label>'+
-        '<div class="pair"><label>SKU<input name="sku" maxlength="40" value="'+safe(part?.sku)+'" required></label>'+
-        '<label>Supplier Name<input name="supplier" maxlength="120" value="'+safe(part?.supplier)+'"></label></div><div class="pair">'+
-        '<label><span data-stock-label>On hand</span><input name="stock" type="number" min="0" max="1000000" value="'+(part?.stock??0)+'" required></label>'+
-        '<label>Low-stock threshold<input name="threshold" type="number" min="0" max="1000000" value="'+(part?.threshold??5)+'" required></label>'+
-        '</div>'+
-        (part?.averageCost != null ? '<p class="muted small">Current average unit cost '+unitMoney(part.averageCost)+'</p>' :
-          '<label>Opening unit cost (₱)<input name="openingCost" type="number" min="0" max="10000000" step=".01" aria-describedby="opening-help"></label>'+
-          '<p id="opening-help" class="muted small">Enter the cost of the units already on hand if they have no recorded cost.</p>')+
-        '<label>Purchase Type<select name="purchaseType"><option value="">No new purchase</option><option>Bulk</option><option>Per Piece</option></select></label>'+
+    function partForm(action, part) {
+      return '<form data-form="'+action+'" class="stack" data-id="'+safe(part?.id)+'" data-revision="'+(part?.revision||'')+'">';
+    }
+
+    function disabledPartField(label, name, value) {
+      return '<label>'+label+'<input name="'+name+'" '+(name==='stock'?'type="number" ':'')+'value="'+safe(value)+'" disabled></label>';
+    }
+
+    function purchaseFields(option, required) {
+      return '<label>Purchase Type<select name="purchaseType" '+(required?'required':'')+'><option value="">'+option+
+        '</option><option>Bulk</option><option>Per Item</option></select></label>'+
         '<div class="stack purchase-fields" data-purchase hidden><div class="pair">'+
         '<label><span data-purchase-price-label>Price (₱)</span><input name="purchasePrice" type="number" min="0" step=".01" disabled></label>'+
         '<label><span data-purchase-quantity-label>Quantity Purchased</span><input name="purchaseQuantity" type="number" min="1" max="1000000" disabled></label>'+
-        '</div><p class="muted small" data-purchase-preview></p></div>'+
-        '<button class="btn">Save part</button></form>');
+        '</div><p class="muted small" data-purchase-preview></p></div>';
+    }
+
+    function openingCostField(required = false) {
+      return '<label>Opening unit cost (₱)<input name="openingCost" type="number" min="0" max="10000000" step=".01"'+
+        (required?' required':'')+'></label>';
+    }
+
+    function addPart() {
+      show('Add part',partForm('savePart')+
+        '<label>Part Name<input name="name" maxlength="100" required></label>'+
+        '<div class="pair"><label>SKU<input name="sku" maxlength="40" required></label>'+
+        '<label>Supplier Name<input name="supplier" maxlength="120"></label></div><div class="pair">'+
+        '<label><span data-stock-label>On Hand</span><input name="stock" type="number" min="0" max="1000000" value="0" required></label>'+
+        '<label>Low Stock Threshold<input name="threshold" type="number" min="0" max="1000000" value="5" required></label></div>'+
+        openingCostField()+'<p class="muted small">Enter the cost of any units already on hand.</p>'+
+        purchaseFields('No new purchase',false)+'<button class="btn">Save part</button></form>');
+    }
+
+    function editPart(id) {
+      if (!id) return addPart();
+      const part = state.data.parts.find(item=>item.id===id);
+      if (!part) return;
+      show('Edit Part','<div class="stack"><strong>'+safe(part.name)+'</strong><div class="actions">'+
+        button('Edit Part Info','editPartInfo',id)+button('Restock','restockPart',id,'')+'</div></div>');
+    }
+
+    function editPartInfo(id) {
+      const part = state.data.parts.find(item=>item.id===id);
+      if (!part) return;
+      show('Edit Part Info',partForm('editPartInfo',part)+
+        '<label>Part Name<input name="name" maxlength="100" value="'+safe(part.name)+'" required></label>'+
+        '<div class="pair">'+disabledPartField('SKU','sku',part.sku)+disabledPartField('Supplier Name','supplier',part.supplier||'Not recorded')+'</div>'+
+        '<div class="pair"><label>On Hand<input name="stock" type="number" min="0" max="1000000" value="'+part.stock+'" required></label>'+
+        '<label>Low Stock Threshold<input name="threshold" type="number" min="0" max="1000000" value="'+part.threshold+'" required></label></div>'+
+        '<div class="actions">'+button('Back','editPart',id)+'<button class="btn">Save part info</button></div></form>');
+    }
+
+    function restockPart(id) {
+      const part = state.data.parts.find(item=>item.id===id);
+      if (!part) return;
+      const needsOpeningCost = part.stock > 0 && part.averageCost == null;
+      show('Restock',partForm('restockPart',part)+disabledPartField('Part Name','name',part.name)+
+        '<div class="pair">'+disabledPartField('SKU','sku',part.sku)+disabledPartField('Current On Hand','stock',part.stock)+'</div>'+
+        purchaseFields('Choose a purchase type',true)+
+        (needsOpeningCost ? '<p class="alert">Set the opening cost for your existing stock before restocking.</p>'+
+          '<div>'+button('Set opening unit cost','openingCost',id)+'</div>' : '')+
+        '<div class="actions">'+button('Back','editPart',id)+'<button class="btn" '+(needsOpeningCost?'disabled':'')+'>Save restock</button></div></form>');
+    }
+
+    function setOpeningCost(id) {
+      const part = state.data.parts.find(item=>item.id===id);
+      if (!part) return;
+      show('Set opening unit cost',partForm('setPartOpeningCost',part)+
+        '<p>Enter what you paid per unit for the '+part.stock+' units of '+safe(part.name)+' already on hand.</p>'+
+        openingCostField(true)+
+        '<div class="actions">'+button('Back','restockPart',id)+'<button class="btn">Save opening cost</button></div></form>');
     }
 
     function updatePurchaseFields(form) {
@@ -253,14 +306,15 @@
       const logging = Boolean(purchaseType.value);
       const bulk = purchaseType.value === 'Bulk';
       form.querySelector('[data-purchase]').hidden = !logging;
-      form.querySelector('[data-stock-label]').textContent = logging ? 'On hand before purchase' : 'On hand';
+      const stockLabel = form.querySelector('[data-stock-label]');
+      if (stockLabel) stockLabel.textContent = logging ? 'On Hand Before Purchase' : 'On Hand';
       form.querySelector('[data-purchase-price-label]').textContent = bulk ? 'Total Price (₱)' : 'Unit Price (₱)';
       form.querySelector('[data-purchase-quantity-label]').textContent = bulk ? 'Total Quantity' : 'Quantity Purchased';
       for (const field of [purchasePrice,purchaseQuantity]) {
         field.disabled = !logging;
         field.required = logging;
       }
-      supplier.required = logging;
+      if (supplier) supplier.required = logging;
       purchasePrice.max = bulk ? '10000000000000' : '10000000';
       if (!logging) return;
       const quantity = purchaseQuantity.valueAsNumber;
@@ -372,7 +426,7 @@
 
     document.addEventListener('input',event=>{
       const field=event.target;
-      if (field.form?.dataset.form === 'savePart' && ['stock','purchasePrice','purchaseQuantity'].includes(field.name)) {
+      if (field.form?.elements.purchaseType && ['stock','purchasePrice','purchaseQuantity'].includes(field.name)) {
         updatePurchaseFields(field.form);
       }
       const id=field.dataset.quantity;
@@ -391,8 +445,11 @@
       dialog.querySelector('[data-action=order]').disabled=Boolean(warning);
     });
     document.addEventListener('change',event=>{
-      if (event.target.name === 'purchaseType' && event.target.form?.dataset.form === 'savePart') {
-        updatePurchaseFields(event.target.form);
+      if (event.target.name === 'purchaseType' && event.target.form?.elements.purchaseType) {
+        const form = event.target.form;
+        form.elements.purchasePrice.value = '';
+        form.elements.purchaseQuantity.value = '';
+        updatePurchaseFields(form);
       }
     });
 
@@ -405,6 +462,9 @@
           case 'close': dialog.close(); break;
           case 'tab': state.tab=id; render(); $('[data-action=tab][data-id="'+id+'"]').focus(); break;
           case 'editPart': editPart(id); break;
+          case 'editPartInfo': editPartInfo(id); break;
+          case 'restockPart': restockPart(id); break;
+          case 'openingCost': setOpeningCost(id); break;
           case 'purchaseHistory': await showPurchaseHistory(id); break;
           case 'editPackage': editPackage(id); break;
           case 'addComponent':
@@ -456,10 +516,14 @@
           return;
         }
         if (form.dataset.id) { data.id=form.dataset.id; data.revision=Number(form.dataset.revision); }
-        if (name==='savePart') {
+        if (name==='savePart' || name==='editPartInfo') {
           data.stock=Number(data.stock);
           data.threshold=Number(data.threshold);
-          data.openingCost=data.openingCost ? Math.round(Number(data.openingCost)*100) : null;
+        }
+        if (name==='savePart' || name==='setPartOpeningCost') {
+          data.openingCost=data.openingCost!=='' ? Math.round(Number(data.openingCost)*100) : null;
+        }
+        if (name==='savePart' || name==='restockPart') {
           if (data.purchaseType) {
             form.dataset.purchaseKey ||= crypto.randomUUID();
             data.purchase={key:form.dataset.purchaseKey,type:data.purchaseType,quantity:Number(data.purchaseQuantity),
@@ -476,10 +540,16 @@
         }
         if (name==='saveBrand') { [data.logo,data.backdrop]=await Promise.all([image(data.logo),image(data.backdrop)]); }
         const result=await rpc(name,data);
-        if (name!=='savePart') state.assets.clear();
+        if (name==='savePackage' || name==='saveBrand') state.assets.clear();
+        if (name==='setPartOpeningCost') {
+          accept(result);
+          restockPart(data.id);
+          return;
+        }
         if (dialog.open) dialog.close();
         accept(result);
-        notice(name==='saveBrand'?'Branding saved.':name==='savePart'?'Part saved.':'Package saved.');
+        const notices = {saveBrand:'Branding saved.',savePart:'Part saved.',editPartInfo:'Part info saved.',restockPart:'Restock saved.',savePackage:'Package saved.'};
+        notice(notices[name]);
       } catch(error) {
         if (error.code==='STALE' && name==='submitOrder') {
           try { accept(await rpc('dashboard')); showCart(); } catch {}
