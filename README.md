@@ -31,16 +31,17 @@ For a first installation, choose **Deploy → New deployment → Web app**, ente
 
 The manifest uses the per-file Drive scope, which grants access to files the app creates or uses. Email scope identifies the deploying account. The external-request permission lets the server fetch the bytes of app-managed images from Google's Drive API.
 
-## Add an owner or a brand
+## System Owner Portal
 
-1. In Script Properties, set NEXT_OWNER_EMAIL to the owner's email and NEXT_BRAND_NAME to the workspace name.
-2. Run **provisionOwner** in the editor as the deploying account. It creates a separate brand folder and spreadsheet and logs the new owner access key. Share the key privately with that owner along with the web-app URL. Anyone who holds the key can access that workspace, so treat it as a password.
-3. To replace a key, set ROTATE_TENANT_ID to the UUID before the period in the old key and run **rotateOwnerKey**. Rotation invalidates that workspace's existing sessions. The same workflow can issue an access key for the initial workspace by using the value of OPERATOR_TENANT as the rotation target.
+- Sign into Google as the deployment owner. On the app's **Owner sign-in** screen, select **Login as system owner**. If the app opens directly in your inventory workspace, sign out of the workspace first.
+- Under **Provision user**, enter the email address and store name. Each new workspace gets its own private Drive subfolder, spreadsheet, and access key. Use **Show key** to retrieve it and share it privately with the intended owner.
+- Existing keys stored as hashes appear as **Legacy key**. They still work and can be replaced when access needs to be reissued. Replacing a key invalidates the old key and active sessions for that workspace. The deployment owner's original workspace may show **No key issued** because it supports Google-based entry.
 
 ## Daily use
 
 - Add individual components under **Inventory parts**. A new part gets a unique SKU prefixed with the current store name's uppercase initials, using up to three letters. A single-word store uses its first three letters. Enter any opening stock and its unit cost, then use **Restock** for purchases.
 - In **Add/Edit Package**, enter a selling price and choose the components and quantities. The form totals their active weighted-average unit costs and subtracts the material cost from the selling price to show profit. Parts without an active unit cost leave the total and profit undetermined.
+- Use **Delete** on a package tile to remove the package from use. The app archives its row in the brand Sheet for order history and keeps the package details on existing orders.
 - Choose **Edit Part → Edit Part Info** to correct the part name, counted stock, or low-stock threshold. The SKU and supplier are displayed as read-only values. These corrections do not add a purchase entry.
 - Choose **Edit Part → Restock** to record a delivery. Use **Bulk** for total price and total quantity, or **Per Item** for unit price and quantity purchased. The app adds the purchased quantity to current stock and logs the part's saved supplier. If older stock lacks a recorded value, use **Set opening unit cost** before saving the restock. Older parts without a saved supplier can still be restocked and are shown as “Supplier not recorded” in the history.
 - Open **Price history** to see recent purchases for a part. The **Purchases** tab contains the full supplier, quantity, unit cost, and weighted-average history. The active unit cost is the remaining inventory value plus the purchase value, divided by the combined quantity. Orders reduce inventory value at the active average.

@@ -2,7 +2,7 @@ const ROOT_NAME = 'Inventory Management System';
 const COLUMNS = {
   Settings: ['Key', 'Value'],
   Parts: ['ID', 'SKU', 'Part', 'On hand', 'Low threshold', 'Revision', 'Supplier name', 'Stock value centavos'],
-  Packages: ['ID', 'Package', 'Description', 'Price centavos', 'Recipe JSON', 'Photo file', 'Revision'],
+  Packages: ['ID', 'Package', 'Description', 'Price centavos', 'Recipe JSON', 'Photo file', 'Revision', 'Deleted UTC'],
   Orders: ['Order ID', 'Submitted UTC', 'Customer', 'Email', 'Phone', 'Address', 'Notes',
     'Currency', 'Total centavos', 'Packages JSON', 'Components deducted JSON', 'Request ID', 'Status', 'Revision', 'Deleted UTC'],
   Purchases: ['Purchase ID', 'Recorded UTC', 'Part ID', 'SKU', 'Part', 'Supplier name', 'Purchase type',
@@ -23,6 +23,22 @@ function doGet() {
 
 function action(name, token, data) {
   try {
+    if (name === 'systemSignIn') return { ok: true, data: { email: verifyOperator_(), users: systemUsers_() } };
+    if (name === 'systemProvision') {
+      verifyOperator_();
+      return { ok: true, data: locked_(() => provisionTenant_(data.email, data.storeName)) };
+    }
+    if (name === 'systemRevealKey') {
+      verifyOperator_();
+      return { ok: true, data: locked_(() => revealOwnerKey_(requireWorkspace_(data.id))) };
+    }
+    if (name === 'systemReplaceKey') {
+      verifyOperator_();
+      return { ok: true, data: locked_(() => {
+        const tenant = requireWorkspace_(data.id);
+        return issueOwnerKey_(tenant, Boolean(tenant.digest));
+      }) };
+    }
     if (name === 'signIn') return { ok: true, data: signIn_(data && data.key) };
     if (name === 'start') {
       if (token) return { ok: true, data: { token, ...dashboard_(tenantFor_(token)) } };
@@ -42,6 +58,7 @@ function action(name, token, data) {
       case 'setPartOpeningCost': return { ok: true, data: locked_(() => setPartOpeningCost_(tenant, data)) };
       case 'purchaseHistory': return { ok: true, data: purchaseHistory_(tenant, data.id) };
       case 'savePackage': return { ok: true, data: locked_(() => savePackage_(tenant, data)) };
+      case 'deletePackage': return { ok: true, data: locked_(() => deletePackage_(tenant, data)) };
       case 'saveBrand': return { ok: true, data: locked_(() => saveBrand_(tenant, data)) };
       case 'submitOrder': return { ok: true, data: locked_(() => submitOrder_(tenant, data)) };
       case 'orders': return { ok: true, data: listOrders_(tenant) };
@@ -59,7 +76,7 @@ function action(name, token, data) {
 function verifyOperator_() {
   const active = Session.getActiveUser().getEmail().toLowerCase();
   const effective = Session.getEffectiveUser().getEmail().toLowerCase();
-  if (!active || active !== effective) fail_('Only the deploying Google account can manage workspaces.', 'AUTH');
+  if (!active || active !== effective) fail_('Sign in to Google as the deploying account to open the system owner portal.', 'AUTH');
   return effective;
 }
 
@@ -75,7 +92,7 @@ function setupOperator() {
       return;
     }
     if (!EMAIL.test(email)) fail_('Google did not provide your email address.');
-    const tenant = createTenant_(email, props.getProperty('INITIAL_BRAND_NAME') || 'Remourà', '');
+    const tenant = createTenant_(email, props.getProperty('INITIAL_BRAND_NAME') || 'Remourà');
     props.setProperty('OPERATOR_TENANT', tenant.id);
     console.log('Inventory Sheet: https://docs.google.com/spreadsheets/d/' + tenant.sheetId + '/edit');
   });
@@ -86,14 +103,10 @@ function provisionOwner() {
   verifyOperator_();
   return locked_(() => {
     const props = PropertiesService.getScriptProperties();
-    const email = text_(props.getProperty('NEXT_OWNER_EMAIL'), 'owner email', 254).toLowerCase();
-    const brand = text_(props.getProperty('NEXT_BRAND_NAME'), 'brand name', 80);
-    if (!EMAIL.test(email)) fail_('Enter a valid owner email.');
-    const secret = randomToken_();
-    const tenant = createTenant_(email, brand, digest_(secret));
+    const user = provisionTenant_(props.getProperty('NEXT_OWNER_EMAIL'), props.getProperty('NEXT_BRAND_NAME'));
     props.deleteProperty('NEXT_OWNER_EMAIL');
     props.deleteProperty('NEXT_BRAND_NAME');
-    console.log('Owner access key for ' + brand + ': ' + tenant.id + '.' + secret);
+    console.log('Workspace created. Open the system owner portal to view its access key. ID: ' + user.id);
   });
 }
 
@@ -102,14 +115,10 @@ function rotateOwnerKey() {
   verifyOperator_();
   return locked_(() => {
     const props = PropertiesService.getScriptProperties();
-    const tenant = readTenant_(props.getProperty('ROTATE_TENANT_ID'));
-    if (!tenant) fail_('Unknown workspace.');
-    const secret = randomToken_();
-    tenant.digest = digest_(secret);
-    tenant.generation += 1;
-    props.setProperty('tenant:' + tenant.id, JSON.stringify(tenant));
+    const tenant = requireWorkspace_(props.getProperty('ROTATE_TENANT_ID'));
+    issueOwnerKey_(tenant, true);
     props.deleteProperty('ROTATE_TENANT_ID');
-    console.log('Replacement owner access key: ' + tenant.id + '.' + secret);
+    console.log('Access key replaced. View the new key in the system owner portal.');
   });
 }
 
@@ -122,7 +131,7 @@ function root_() {
   return folder.id;
 }
 
-function createTenant_(email, rawBrand, digest) {
+function createTenant_(email, rawBrand) {
   const brand = text_(rawBrand, 'brand name', 80);
   const id = Utilities.getUuid();
   const folder = Drive.Files.create({ name: brand + ' · ' + id.slice(0, 8),
@@ -147,7 +156,8 @@ function createTenant_(email, rawBrand, digest) {
     } }];
   });
   write_(sheet, requests);
-  const tenant = { id, email, brand, digest, folderId: folder.id, sheetId: file.id, generation: 1, purchaseSchema: 1, orderSchema: 1 };
+  const tenant = { id, email, brand, digest: '', folderId: folder.id, sheetId: file.id, generation: 1,
+    purchaseSchema: 1, orderSchema: 1, packageSchema: 1 };
   PropertiesService.getScriptProperties().setProperty('tenant:' + id, JSON.stringify(tenant));
   return tenant;
 }
@@ -155,6 +165,70 @@ function createTenant_(email, rawBrand, digest) {
 function readTenant_(id) {
   const raw = UUID.test(String(id)) && PropertiesService.getScriptProperties().getProperty('tenant:' + id);
   return raw ? JSON.parse(raw) : null;
+}
+
+function requireWorkspace_(id) {
+  const tenant = readTenant_(id);
+  if (!tenant) fail_('Workspace not found.');
+  return tenant;
+}
+
+function systemUsers_() {
+  const properties = PropertiesService.getScriptProperties().getProperties();
+  return Object.keys(properties).filter(key => key.startsWith('tenant:') && UUID.test(key.slice(7)))
+    .map(key => {
+      const tenant = JSON.parse(properties[key]);
+      let storeName = tenant.brand;
+      try {
+        const savedName = settings_({ id: tenant.sheetId }).storeName;
+        if (typeof savedName === 'string' && savedName.trim()) storeName = savedName;
+      } catch {
+        console.warn('Could not read a workspace display name.');
+      }
+      return { id: tenant.id, email: tenant.email, storeName,
+        keyStatus: tenant.keyNonce ? 'ready' : tenant.digest ? 'legacy' : 'none' };
+    }).sort((a, b) => a.storeName.localeCompare(b.storeName));
+}
+
+function provisionTenant_(emailValue, nameValue) {
+  const email = text_(emailValue, 'email address', 254).toLowerCase();
+  const storeName = text_(nameValue, 'store name', 80);
+  if (!EMAIL.test(email)) fail_('Enter a valid email address.');
+  if (systemUsers_().some(user => user.email === email && user.storeName.toLowerCase() === storeName.toLowerCase())) {
+    fail_('This email already has a workspace with that store name.');
+  }
+  const tenant = createTenant_(email, storeName);
+  issueOwnerKey_(tenant, false);
+  return { id: tenant.id, email, storeName, keyStatus: 'ready' };
+}
+
+function deriveOwnerSecret_(tenant, master) {
+  const input = 'owner-access:v1:' + [tenant.id, tenant.generation, tenant.keyNonce].join(':');
+  return Utilities.computeHmacSha256Signature(input, master)
+    .map(byte => (byte & 255).toString(16).padStart(2, '0')).join('');
+}
+
+function issueOwnerKey_(tenant, replace) {
+  const props = PropertiesService.getScriptProperties();
+  let master = props.getProperty('OWNER_KEY_MASTER_V1');
+  if (!master) {
+    master = randomToken_();
+    props.setProperty('OWNER_KEY_MASTER_V1', master);
+  }
+  if (replace) tenant.generation += 1;
+  tenant.keyNonce = Utilities.getUuid();
+  const secret = deriveOwnerSecret_(tenant, master);
+  tenant.digest = digest_(secret);
+  props.setProperty('tenant:' + tenant.id, JSON.stringify(tenant));
+  return tenant.id + '.' + secret;
+}
+
+function revealOwnerKey_(tenant) {
+  const master = PropertiesService.getScriptProperties().getProperty('OWNER_KEY_MASTER_V1');
+  if (!master || !tenant.keyNonce) fail_('This key cannot be revealed. Issue a replacement from the portal.');
+  const secret = deriveOwnerSecret_(tenant, master);
+  if (!equal_(tenant.digest, digest_(secret))) fail_('This key cannot be revealed. Issue a replacement from the portal.');
+  return tenant.id + '.' + secret;
 }
 
 function operatorTenant_() {
@@ -265,10 +339,10 @@ function write_(sheet, requests) {
 }
 
 function ensureWorkspaceSchema_(tenant) {
-  if (tenant.purchaseSchema === 1 && tenant.orderSchema === 1) return;
+  if (tenant.purchaseSchema === 1 && tenant.orderSchema === 1 && tenant.packageSchema === 1) return;
   locked_(() => {
     const current = readTenant_(tenant.id);
-    if (current.purchaseSchema === 1 && current.orderSchema === 1) return;
+    if (current.purchaseSchema === 1 && current.orderSchema === 1 && current.packageSchema === 1) return;
     const sheet = book_(current.sheetId);
     const requests = [];
     if (current.purchaseSchema !== 1) {
@@ -280,9 +354,11 @@ function ensureWorkspaceSchema_(tenant) {
       requests.push(update_(sheet.tab('Parts'), 0, 6, [COLUMNS.Parts.slice(6)]));
     }
     if (current.orderSchema !== 1) requests.push(update_(sheet.tab('Orders'), 0, 12, [COLUMNS.Orders.slice(12)]));
+    if (current.packageSchema !== 1) requests.push(update_(sheet.tab('Packages'), 0, 7, [COLUMNS.Packages.slice(7)]));
     write_(sheet, requests);
     current.purchaseSchema = 1;
     current.orderSchema = 1;
+    current.packageSchema = 1;
     PropertiesService.getScriptProperties().setProperty('tenant:' + current.id, JSON.stringify(current));
   });
 }
@@ -295,9 +371,10 @@ function parts_(sheet) {
   }).filter(part => part.id);
 }
 
-function packages_(sheet) {
-  return rows_(sheet, 'Packages').map(([id, name, description, price, recipe, photo, revision], index) =>
-    ({ id, name, description, price, recipe: id ? JSON.parse(recipe) : [], photo, revision, index: index + 1 })).filter(kit => kit.id);
+function packages_(sheet, includeDeleted = false) {
+  return rows_(sheet, 'Packages').map(([id, name, description, price, recipe, photo, revision, deleted], index) =>
+    ({ id, name, description, price, recipe: id ? JSON.parse(recipe) : [], photo, revision, deleted, index: index + 1 }))
+    .filter(kit => kit.id && (includeDeleted || !kit.deleted));
 }
 
 function settings_(sheet) {
@@ -309,7 +386,7 @@ function packageStatus_(kit, partMap) {
     id, quantity, name: partMap.get(id)?.name || 'Missing part (' + id + ')', stock: partMap.get(id)?.stock ?? 0,
   }));
   const available = components.length ? Math.min(...components.map(part => Math.floor(part.stock / part.quantity))) : 0;
-  const { index, recipe, photo, ...fields } = kit;
+  const { index, recipe, photo, deleted, ...fields } = kit;
   return { ...fields, components, available, missing: components.filter(part => part.stock < part.quantity), hasPhoto: Boolean(photo) };
 }
 
@@ -458,6 +535,18 @@ function savePackage_(tenant, data) {
   return dashboard_(tenant);
 }
 
+function deletePackage_(tenant, data) {
+  const sheet = book_(tenant.sheetId);
+  const kit = packages_(sheet, true).find(item => item.id === data.id);
+  if (!kit || (!kit.deleted && kit.revision !== data.revision)) {
+    fail_('The package changed. Refresh your packages and try again.', 'STALE');
+  }
+  if (!kit.deleted) {
+    write_(sheet, [update_(sheet.tab('Packages'), kit.index, 6, [[kit.revision + 1, new Date().toISOString()]])]);
+  }
+  return dashboard_(tenant);
+}
+
 function saveBrand_(tenant, data) {
   const sheet = book_(tenant.sheetId);
   const tab = sheet.tab('Settings');
@@ -540,14 +629,17 @@ function orderLines_(data) {
 }
 
 function prepareOrder_(sheet, selected, previous = []) {
-  const packages = new Map(packages_(sheet).map(kit => [kit.id, kit]));
+  const packages = new Map(packages_(sheet, previous.length > 0).map(kit => [kit.id, kit]));
   const original = new Map(previous.map(line => [line.id, line]));
   const required = new Map();
   let total = 0;
   const lines = selected.map(({ id, revision, quantity }) => {
     const kit = packages.get(id);
-    if (!kit || revision !== kit.revision) fail_('A package changed or is unavailable. Reopen the order and try again.', 'STALE');
-    const price = original.get(id)?.price ?? kit.price;
+    const old = original.get(id);
+    if (!kit || (kit.deleted ? !old || quantity > old.quantity : revision !== kit.revision)) {
+      fail_('A package changed or is unavailable. Reopen the order and try again.', 'STALE');
+    }
+    const price = old?.price ?? kit.price;
     total += price * quantity;
     for (const component of kit.recipe) {
       required.set(component.id, (required.get(component.id) || 0) + component.quantity * quantity);

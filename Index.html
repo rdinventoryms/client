@@ -40,7 +40,11 @@
     .history-entry{border-bottom:1px solid var(--line);padding-bottom:11px}.history-entry:last-child{border-bottom:0}
     .alert{color:#772f23;background:#f8e5de;border-radius:8px;padding:9px 12px;font-size:.9rem}.toast{position:fixed;right:16px;bottom:16px;max-width:calc(100% - 32px);background:#30231a;color:#fff;border-radius:8px;padding:10px 16px;box-shadow:0 8px 24px #0003}
     .signin{max-width:440px;padding:23px}.signin h1{font-size:2.3rem}.skip:not(:focus){position:absolute;clip-path:inset(50%)} .skip:focus{position:absolute;background:#fff;padding:8px}
-    @media(max-width:850px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    .system-link{position:fixed;right:clamp(16px,4vw,40px);bottom:18px;color:#605852;font-size:.875rem;text-decoration:underline;text-underline-offset:3px}
+    .system-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(235px,1fr);gap:16px;align-items:start}
+    .system-grid table{white-space:normal;overflow-wrap:anywhere}.system-grid form{padding:18px}
+    .system-grid h2{margin-bottom:8px}.system-key{font:0.875rem/1.5 monospace;overflow-wrap:anywhere}
+    @media(max-width:850px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.system-grid{grid-template-columns:1fr}}
     @media(max-width:550px){.wrap{width:calc(100% - 28px)}main{padding-top:24px}.tiles{grid-template-columns:1fr}.metric{padding:10px}.metric span{font-size:.78rem}.brand strong{font-size:1.2rem}.actions{gap:5px}.bar .btn{padding-inline:8px}.pair{gap:7px}}
   </style>
 </head>
@@ -64,7 +68,7 @@
     const imageURL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
     const defaults = {storeName:'Inventory',accent:'#785032',background:'#faf6ed',ink:'#2d241e'};
     const orderStatuses = ['Order Placed','Assembling','Delivery','Fulfilled'];
-    const state = {data:null,token:null,tab:'packages',orders:null,cart:new Map(),orderKey:null,assets:new Map(),opener:null};
+    const state = {data:null,system:null,token:null,tab:'packages',orders:null,cart:new Map(),orderKey:null,assets:new Map(),opener:null};
     const button = (label,action,id='',kind='secondary',disabled=false) =>
       '<button type="button" class="btn '+kind+'" data-action="'+action+'" data-id="'+safe(id)+'"'+(disabled?' disabled':'')+'>'+label+'</button>';
 
@@ -102,15 +106,18 @@
       if (!dialog.open) dialog.showModal();
       else dialog.querySelector('input,button')?.focus();
     }
-    dialog.addEventListener('close',()=> (state.opener?.isConnected ? state.opener : main).focus({preventScroll:true}));
+    dialog.addEventListener('close',()=>{
+      if (!dialog.open && dialog.querySelector('[data-system-key]')) dialog.replaceChildren();
+      (state.opener?.isConnected ? state.opener : main).focus({preventScroll:true});
+    });
 
     function fail(error) {
-      if (error.code === 'AUTH' && state.token) {
+      if (error.code === 'AUTH' && (state.token || state.system)) {
         if (dialog.open) dialog.close();
         signInView(error.message);
         return;
       }
-      const target = dialog.open ? $('#dialog-error') : $('#login-error');
+      const target = dialog.open ? $('#dialog-error') : $('#login-error') || $('#system-error');
       if (target) { target.textContent = error.message; target.hidden = false; }
       else notice(error.message);
     }
@@ -153,6 +160,7 @@
     function signInView(message='') {
       session(null);
       state.data = null;
+      state.system = null;
       state.orders = null;
       state.cart.clear();
       state.orderKey = null;
@@ -162,8 +170,47 @@
       main.innerHTML='<section class="surface signin stack"><h1>Owner sign-in</h1>'+
         '<p class="muted">Enter the access key for your brand workspace.</p><p id="login-error" class="alert" role="alert" hidden></p>'+
         '<form class="stack" data-form="signIn"><label>Owner access key<input name="key" type="password" required autocomplete="off"></label>'+
-        '<button class="btn">Sign in</button></form></section>';
+        '<button class="btn">Sign in</button></form></section>'+
+        '<a class="system-link" href="#system-owner" target="_self" data-action="systemSignIn">Login as system owner</a>';
       if (message) fail(new Error(message));
+    }
+
+    function renderSystem() {
+      const {email,users} = state.system;
+      $('#header-actions').innerHTML = button('Back to owner sign-in','systemExit');
+      main.innerHTML = '<section><div class="intro"><h1>Super Admin</h1><p>'+safe(email)+'</p></div>'+
+        '<p id="system-error" class="alert" role="alert" hidden></p><div class="system-grid">'+
+        '<section aria-labelledby="system-users"><h2 id="system-users">Users</h2>'+
+        (users.length ? '<div class="surface scroll"><table><thead><tr><th scope="col">Store Name</th>'+
+          '<th scope="col">Email Address</th><th scope="col">Access key</th></tr></thead><tbody>'+
+          users.map(user=>{
+            const status = {legacy:'Legacy key',none:'No key issued',ready:'••••••••'}[user.keyStatus];
+            return '<tr><td>'+safe(user.storeName)+'</td><td>'+safe(user.email)+'</td><td><div class="actions">'+status+
+              (user.keyStatus==='ready'?button('Show key','systemRevealKey',user.id):'')+
+              button(user.keyStatus==='none'?'Issue key':'Replace key','systemReplaceKey',user.id)+'</div></td></tr>';
+          }).join('')+'</tbody></table></div>' : '<p class="surface empty">No owner workspaces yet.</p>')+'</section>'+
+        '<form class="surface stack" data-form="systemProvision"><h2>Provision user</h2>'+
+        '<label>Email Address<input name="email" type="email" maxlength="254" required></label>'+
+        '<label>Store Name<input name="storeName" maxlength="80" required></label>'+
+        '<button class="btn">Create workspace</button></form></div></section>';
+    }
+
+    function showSystemKey(id, key) {
+      const user = state.system?.users.find(item=>item.id===id);
+      if (!user) return;
+      show('Owner access key','<div class="stack"><p>'+safe(user.storeName)+'</p>'+
+        '<textarea class="system-key" data-system-key aria-label="Owner access key" rows="3" readonly>'+safe(key)+'</textarea>'+
+        '<div>'+button('Copy key','copySystemKey')+'</div></div>');
+    }
+
+    function confirmSystemKey(id) {
+      const user = state.system?.users.find(item=>item.id===id);
+      if (!user) return;
+      const replace = user.keyStatus!=='none';
+      show(replace?'Replace access key':'Issue access key','<form class="stack" data-form="systemReplaceKey" data-id="'+
+        safe(id)+'"><p>'+safe(user.storeName)+'</p>'+
+        (replace?'<p>The old key and active sessions for this workspace will stop working.</p>':'')+
+        '<div class="actions">'+button('Cancel','close')+'<button class="btn">'+(replace?'Replace key':'Issue key')+'</button></div></form>');
     }
 
     function accept(result) {
@@ -205,7 +252,8 @@
             (kit.description?'<p class="muted small">'+safe(kit.description)+'</p>':'')+
             (grey?'<ul class="shortages">'+kit.missing.map(part=>'<li>'+safe(part.name)+' · '+part.stock+' on hand, '+part.quantity+' needed</li>').join('')+'</ul>'
               :'<p class="muted small">'+kit.available+' can be assembled</p>')+'</div><div class="actions tile-actions">'+
-            button('Edit package','editPackage',kit.id)+button('Add to Cart','add',kit.id,'',grey)+'</div></article>';
+            button('Edit package','editPackage',kit.id)+button('Add to Cart','add',kit.id,'',grey)+
+            button('Delete','deletePackage',kit.id)+'</div></article>';
         }).join('')+'</div>':'<p class="surface empty">Add inventory parts, then create your first package.</p>');
       for (const image of document.querySelectorAll('[data-photo]')) asset('package',image.dataset.photo).then(url=>{
         if (url && image.isConnected) { image.src=url; image.hidden=false; }
@@ -456,6 +504,15 @@
       packageMargin(dialog.querySelector('form'));
     }
 
+    function confirmDeletePackage(id) {
+      const kit = state.data.packages.find(item=>item.id===id);
+      if (!kit) return;
+      show('Delete package','<form class="stack" data-form="deletePackage" data-id="'+safe(id)+
+        '" data-revision="'+kit.revision+'"><p>Remove <strong>'+safe(kit.name)+'</strong> from the package list?</p>'+
+        '<p class="muted small">The package will be removed from your cart. Existing orders retain their package details.</p>'+
+        '<div class="actions">'+button('Cancel','close')+'<button class="btn danger">Delete package</button></div></form>');
+    }
+
     function packageMargin(form) {
       const parts = new Map(state.data.parts.map(part=>[part.id,part]));
       const missing = new Set();
@@ -580,6 +637,26 @@
       try {
         switch(action) {
           case 'close': dialog.close(); break;
+          case 'systemSignIn':
+            event.preventDefault();
+            state.system=await rpc('systemSignIn',null,null);
+            renderSystem();
+            main.focus();
+            break;
+          case 'systemExit': signInView(); break;
+          case 'systemRevealKey': {
+            const key=await rpc('systemRevealKey',{id},null);
+            if (state.system) showSystemKey(id,key);
+            break;
+          }
+          case 'systemReplaceKey': confirmSystemKey(id); break;
+          case 'copySystemKey': {
+            const key=dialog.querySelector('[data-system-key]');
+            if (!key) break;
+            try { await navigator.clipboard.writeText(key.value); notice('Access key copied.'); }
+            catch { key.focus(); key.select(); dialogError('Use your keyboard to copy the selected access key.'); }
+            break;
+          }
           case 'tab':
             state.tab=id;
             if (id==='orders') state.orders=null;
@@ -590,6 +667,7 @@
           case 'openingCost': setOpeningCost(id); break;
           case 'purchaseHistory': await showPurchaseHistory(id); break;
           case 'editPackage': editPackage(id); break;
+          case 'deletePackage': confirmDeletePackage(id); break;
           case 'editOrder': editOrder(id); break;
           case 'deleteOrder': confirmDeleteOrder(id); break;
           case 'addOrderLine':
@@ -649,6 +727,25 @@
           session(result.token); state.tab='packages'; accept(result);
           return;
         }
+        if (name==='systemProvision') {
+          const user=await rpc(name,data,null);
+          if (!state.system) return;
+          state.system.users.push(user);
+          state.system.users.sort((a,b)=>a.storeName.localeCompare(b.storeName));
+          renderSystem();
+          notice('Workspace created. Choose Show key to retrieve its access key.');
+          return;
+        }
+        if (name==='systemReplaceKey') {
+          const id=form.dataset.id;
+          const key=await rpc(name,{id},null);
+          if (!state.system) return;
+          state.system.users.find(user=>user.id===id).keyStatus='ready';
+          renderSystem();
+          if (dialog.open) showSystemKey(id,key);
+          else notice('Access key updated.');
+          return;
+        }
         if (name==='submitOrder') {
           const fromCart = form.dataset.source==='cart';
           if (fromCart) {
@@ -694,6 +791,11 @@
         }
         if (name==='saveBrand') { [data.logo,data.backdrop]=await Promise.all([image(data.logo),image(data.backdrop)]); }
         const result=await rpc(name,data);
+        if (name==='deletePackage') {
+          state.cart.delete(data.id);
+          state.orderKey=null;
+          state.assets.delete('package:'+data.id);
+        }
         if (name==='updateOrder' || name==='deleteOrder') state.orders=null;
         if (name==='savePackage' || name==='saveBrand') state.assets.clear();
         if (name==='setPartOpeningCost') {
@@ -704,7 +806,8 @@
         if (dialog.open) dialog.close();
         accept(result);
         const notices = {saveBrand:'Branding saved.',savePart:'Part saved.',editPartInfo:'Part info saved.',
-          restockPart:'Restock saved.',savePackage:'Package saved.',updateOrder:'Order updated.',deleteOrder:'Order deleted and stock returned.'};
+          restockPart:'Restock saved.',savePackage:'Package saved.',deletePackage:'Package deleted.',
+          updateOrder:'Order updated.',deleteOrder:'Order deleted and stock returned.'};
         notice(notices[name]);
       } catch(error) {
         if (error.code==='STALE' && ['submitOrder','updateOrder','deleteOrder'].includes(name)) {
