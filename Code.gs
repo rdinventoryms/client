@@ -16,9 +16,15 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SESSION_TTL = 21600;
 const ORDER_STATUSES = ['Order Placed', 'Assembling', 'Delivery', 'Fulfilled'];
 
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index').setTitle('Inventory Management System')
+function doGet(e) {
+  const title = (PropertiesService.getScriptProperties().getProperty('APP_PAGE_TITLE') || '').trim() || ROOT_NAME;
+  const page = HtmlService.createHtmlOutputFromFile('Index')
+    .setTitle(title)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  if (e && e.parameter && e.parameter.embed === '1') {
+    page.setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+  return page;
 }
 
 function action(name, token, data) {

@@ -2,6 +2,12 @@
 
 A Google Apps Script web app for managing multiple brands. The deployment account owns the Drive storage. Owners work in the app using their brand access key.
 
+## GitHub Pages entry point
+
+The static wrapper lives at `docs/index.html`. Its GitHub Pages source is `main` → `/docs`, with the default project URL `https://rdinventoryms.github.io/client/`. If Google gives you a new `/exec` URL, update the `app-link` link in that file. The public Pages address can stay the same. Add a future `.com` in the repository's Pages custom domain settings and point its DNS to GitHub Pages. [GitHub Pages custom domains](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site)
+
+The wrapper adds `embed=1` to the frame URL. Apps Script allows framing on that response and keeps its default frame protection for direct visits. Set the optional `APP_PAGE_TITLE` Script Property to customize the direct Apps Script page title. The public wrapper uses its own HTML title. Use **Open app directly** for Google-account features such as system-owner sign-in if the browser blocks third-party sign-in inside the frame.
+
 ## Update the files and redeploy
 
 ### 1. Update your Apps Script project
