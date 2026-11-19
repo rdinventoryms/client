@@ -32,6 +32,8 @@
     dialog::backdrop{background:#2c211bb0}.dialog-head{margin-bottom:16px;align-items:start}.stack{display:grid;gap:13px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     label{display:grid;gap:5px;font-size:.9rem;font-weight:650} input,select,textarea{background:#fff;border:1px solid #a69a8b;border-radius:7px;min-height:42px;padding:7px 10px;color:#29211b;min-width:0;width:100%}textarea{resize:vertical}input[type=color]{padding:3px} .check{display:flex;gap:7px;align-items:center}.check input{width:17px;min-height:0}
     .recipe{display:grid;grid-template-columns:minmax(0,1fr) 82px 37px;gap:8px;align-items:end}.cart-line{display:grid;grid-template-columns:minmax(0,1fr) 72px 38px;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px} .cart-line strong{overflow-wrap:anywhere}
+    .purchase-fields{background:#f7f1e8;border:1px solid var(--line);border-radius:9px;padding:12px}
+    .history-entry{border-bottom:1px solid var(--line);padding-bottom:11px}.history-entry:last-child{border-bottom:0}
     .alert{color:#772f23;background:#f8e5de;border-radius:8px;padding:9px 12px;font-size:.9rem}.toast{position:fixed;right:16px;bottom:16px;max-width:calc(100% - 32px);background:#30231a;color:#fff;border-radius:8px;padding:10px 16px;box-shadow:0 8px 24px #0003}
     .signin{max-width:440px;padding:23px}.signin h1{font-size:2.3rem}.skip:not(:focus){position:absolute;clip-path:inset(50%)} .skip:focus{position:absolute;background:#fff;padding:8px}
     @media(max-width:850px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -49,6 +51,10 @@
     const main = $('#main');
     const dialog = $('#dialog');
     const money = amount => new Intl.NumberFormat('en-PH',{style:'currency',currency:'PHP'}).format(amount/100);
+    const unitMoney = amount => amount == null ? '—' : new Intl.NumberFormat('en-PH',{
+      style:'currency',currency:'PHP',minimumFractionDigits:2,maximumFractionDigits:4,
+    }).format(amount/100);
+    const displayDate = new Intl.DateTimeFormat('en-PH',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Manila'});
     const safe = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
     const hex = /^#[0-9a-f]{6}$/i;
     const imageURL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
@@ -202,10 +208,11 @@
     function renderParts(parts) {
       $('#panel').innerHTML='<div class="row section-head"><h2>Inventory parts</h2>'+button('Add part','editPart','','')+'</div>'+
         (parts.length?'<div class="surface scroll"><table><thead><tr><th scope="col">SKU</th><th scope="col">Part</th><th scope="col">On hand</th>'+
-        '<th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>'+parts.map(part=>
-          '<tr><td>'+safe(part.sku)+'</td><td>'+safe(part.name)+'</td><td>'+part.stock+'</td><td><span class="badge'+
+        '<th scope="col">Supplier</th><th scope="col">Average unit cost</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>'+parts.map(part=>
+          '<tr><td>'+safe(part.sku)+'</td><td>'+safe(part.name)+'</td><td>'+part.stock+'</td><td>'+safe(part.supplier || '—')+
+          '</td><td>'+(part.stock && part.averageCost == null?'Uncosted':unitMoney(part.averageCost))+'</td><td><span class="badge'+
           (part.stock<=part.threshold?' off':'')+'">'+(part.stock===0?'Out of stock':part.stock<=part.threshold?'Low stock':'In stock')+
-          '</span></td><td>'+button('Edit','editPart',part.id)+'</td></tr>').join('')+
+          '</span></td><td><div class="actions">'+button('Edit','editPart',part.id)+button('Price history','purchaseHistory',part.id)+'</div></td></tr>').join('')+
         '</tbody></table></div>':'<p class="surface empty">Add your first inventory part to track stock.</p>');
     }
 
@@ -225,10 +232,60 @@
       const part=state.data.parts.find(item=>item.id===id);
       show(part?'Edit part':'Add part','<form data-form="savePart" class="stack" data-id="'+safe(id)+'" data-revision="'+(part?.revision||'')+'">'+
         '<label>Part name<input name="name" maxlength="100" value="'+safe(part?.name)+'" required></label>'+
-        '<label>SKU<input name="sku" maxlength="40" value="'+safe(part?.sku)+'" required></label><div class="pair">'+
-        '<label>On hand<input name="stock" type="number" min="0" max="1000000" value="'+(part?.stock??0)+'" required></label>'+
+        '<div class="pair"><label>SKU<input name="sku" maxlength="40" value="'+safe(part?.sku)+'" required></label>'+
+        '<label>Supplier Name<input name="supplier" maxlength="120" value="'+safe(part?.supplier)+'"></label></div><div class="pair">'+
+        '<label><span data-stock-label>On hand</span><input name="stock" type="number" min="0" max="1000000" value="'+(part?.stock??0)+'" required></label>'+
         '<label>Low-stock threshold<input name="threshold" type="number" min="0" max="1000000" value="'+(part?.threshold??5)+'" required></label>'+
-        '</div><button class="btn">Save part</button></form>');
+        '</div>'+
+        (part?.averageCost != null ? '<p class="muted small">Current average unit cost '+unitMoney(part.averageCost)+'</p>' :
+          '<label>Opening unit cost (₱)<input name="openingCost" type="number" min="0" max="10000000" step=".01" aria-describedby="opening-help"></label>'+
+          '<p id="opening-help" class="muted small">Enter the cost of the units already on hand if they have no recorded cost.</p>')+
+        '<label>Purchase Type<select name="purchaseType"><option value="">No new purchase</option><option>Bulk</option><option>Per Piece</option></select></label>'+
+        '<div class="stack purchase-fields" data-purchase hidden><div class="pair">'+
+        '<label><span data-purchase-price-label>Price (₱)</span><input name="purchasePrice" type="number" min="0" step=".01" disabled></label>'+
+        '<label><span data-purchase-quantity-label>Quantity Purchased</span><input name="purchaseQuantity" type="number" min="1" max="1000000" disabled></label>'+
+        '</div><p class="muted small" data-purchase-preview></p></div>'+
+        '<button class="btn">Save part</button></form>');
+    }
+
+    function updatePurchaseFields(form) {
+      const {stock,supplier,purchasePrice,purchaseQuantity,purchaseType} = form.elements;
+      const logging = Boolean(purchaseType.value);
+      const bulk = purchaseType.value === 'Bulk';
+      form.querySelector('[data-purchase]').hidden = !logging;
+      form.querySelector('[data-stock-label]').textContent = logging ? 'On hand before purchase' : 'On hand';
+      form.querySelector('[data-purchase-price-label]').textContent = bulk ? 'Total Price (₱)' : 'Unit Price (₱)';
+      form.querySelector('[data-purchase-quantity-label]').textContent = bulk ? 'Total Quantity' : 'Quantity Purchased';
+      for (const field of [purchasePrice,purchaseQuantity]) {
+        field.disabled = !logging;
+        field.required = logging;
+      }
+      supplier.required = logging;
+      purchasePrice.max = bulk ? '10000000000000' : '10000000';
+      if (!logging) return;
+      const quantity = purchaseQuantity.valueAsNumber;
+      const price = purchasePrice.valueAsNumber;
+      const ready = quantity > 0 && Number.isFinite(price) && purchasePrice.validity.valid && purchaseQuantity.validity.valid;
+      form.querySelector('[data-purchase-preview]').textContent = ready
+        ? (bulk ? 'Unit cost '+unitMoney(Math.round(price*100)/quantity) : 'Purchase total '+money(Math.round(price*100)*quantity))+
+          ' · Stock after purchase '+((stock.valueAsNumber||0)+quantity)
+        : 'The purchased quantity will be added to the on-hand stock above.';
+    }
+
+    async function showPurchaseHistory(id) {
+      const part = state.data.parts.find(item=>item.id===id);
+      if (!part) return;
+      const title = 'Price history';
+      show(title,'<p role="status">Loading purchase history…</p>');
+      const entries = await rpc('purchaseHistory',{id});
+      if (!dialog.open || $('#dialog-title').textContent !== title) return;
+      show(title,'<div class="stack"><strong>'+safe(part.name)+'</strong>'+
+        (entries.length ? entries.map(entry=>'<div class="history-entry"><div class="row"><strong>'+
+          safe(entry.supplier)+'</strong><time>'+displayDate.format(new Date(entry.date))+'</time></div>'+
+          '<p class="muted small">'+safe(entry.type)+' · '+entry.quantity+' units · '+money(entry.total)+' total</p>'+
+          '<p class="small">Unit cost '+unitMoney(entry.unitCost)+' · Average after purchase '+unitMoney(entry.averageCost)+'</p></div>').join('')+
+          '<p class="muted small">Recent purchases are shown here. The Purchases Sheet contains the full history.</p>'
+          : '<p class="muted">No purchases have been logged for this part.</p>')+'</div>');
     }
 
     function componentRow(component={}) {
@@ -315,6 +372,9 @@
 
     document.addEventListener('input',event=>{
       const field=event.target;
+      if (field.form?.dataset.form === 'savePart' && ['stock','purchasePrice','purchaseQuantity'].includes(field.name)) {
+        updatePurchaseFields(field.form);
+      }
       const id=field.dataset.quantity;
       if (!id) return;
       if (field.checkValidity() && state.cart.get(id).quantity!==field.valueAsNumber) {
@@ -330,6 +390,11 @@
       $('#cart-warning').hidden=!warning;
       dialog.querySelector('[data-action=order]').disabled=Boolean(warning);
     });
+    document.addEventListener('change',event=>{
+      if (event.target.name === 'purchaseType' && event.target.form?.dataset.form === 'savePart') {
+        updatePurchaseFields(event.target.form);
+      }
+    });
 
     document.addEventListener('click',async event=>{
       const control=event.target.closest('[data-action]');
@@ -340,6 +405,7 @@
           case 'close': dialog.close(); break;
           case 'tab': state.tab=id; render(); $('[data-action=tab][data-id="'+id+'"]').focus(); break;
           case 'editPart': editPart(id); break;
+          case 'purchaseHistory': await showPurchaseHistory(id); break;
           case 'editPackage': editPackage(id); break;
           case 'addComponent':
             if ($('#recipe').children.length<40) {
@@ -390,7 +456,17 @@
           return;
         }
         if (form.dataset.id) { data.id=form.dataset.id; data.revision=Number(form.dataset.revision); }
-        if (name==='savePart') { data.stock=Number(data.stock); data.threshold=Number(data.threshold); }
+        if (name==='savePart') {
+          data.stock=Number(data.stock);
+          data.threshold=Number(data.threshold);
+          data.openingCost=data.openingCost ? Math.round(Number(data.openingCost)*100) : null;
+          if (data.purchaseType) {
+            form.dataset.purchaseKey ||= crypto.randomUUID();
+            data.purchase={key:form.dataset.purchaseKey,type:data.purchaseType,quantity:Number(data.purchaseQuantity),
+              price:Math.round(Number(data.purchasePrice)*100)};
+          }
+          delete data.purchaseType; delete data.purchaseQuantity; delete data.purchasePrice;
+        }
         if (name==='savePackage') {
           data.price=Math.round(Number(data.price)*100);
           data.components=[...form.querySelectorAll('.recipe')].map(row=>({id:row.querySelector('select').value,quantity:row.querySelector('input').valueAsNumber}));

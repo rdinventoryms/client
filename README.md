@@ -6,7 +6,7 @@ A Google Apps Script web app for managing multiple brands. The deployment accoun
 
 1. In a standalone Apps Script project, add Code.gs and Index.html. Under Project Settings, show the manifest and replace appsscript.json with the included manifest. It enables the advanced Drive and Sheets services. For a standard Google Cloud project, enable both APIs in that project as well.
 2. Optionally set INITIAL_BRAND_NAME in Script Properties. Select **setupOperator** in the editor and run it as the deploying Google account. Review the requested permissions in Google. The setup creates the **Inventory Management System** root and the first brand workspace. The execution log shows the first inventory Sheet link. Running setup again retrieves the existing workspace.
-3. Deploy as a **Web app**, executing as the deploying owner. Set access to **Anyone with a Google account** when enabled for invited external owners. For a deployment-account-only test, use **Only myself**. Open the resulting web-app URL. The deploying Google account can enter its initial workspace automatically when Apps Script supplies its active email.
+3. Deploy as a **Web app** with **Execute as Me** and **Who has access Anyone**. For an existing deployment, edit it and select a new version. The deploying owner authorizes Drive once. Other owners open the web-app URL and use their brand access keys without granting Google Drive access. The deploying Google account can enter its initial workspace automatically when Apps Script supplies its active email.
 
 The manifest uses the per-file Drive scope, which grants access to files the app creates or uses. Email scope identifies the deploying account. The external-request permission lets the server fetch the bytes of app-managed images from Google's Drive API.
 
@@ -19,11 +19,13 @@ The manifest uses the per-file Drive scope, which grants access to files the app
 ## Daily use
 
 - Add individual components under **Inventory parts**, then build packages from those components. Package prices are stored in centavos and displayed in Philippine pesos.
+- Select **Bulk** to enter the total price and quantity, or **Per Piece** to enter the unit price and quantity purchased. When recording a purchase, enter the count on hand before the delivery and the supplier name. The app adds the purchased quantity. If older units lack a recorded cost, enter an opening unit cost before logging the first purchase against those units.
+- Open **Price history** to see recent purchases for a part. The **Purchases** tab contains the full supplier, quantity, unit cost, and weighted-average history. The active unit cost is the remaining inventory value plus the purchase value, divided by the combined quantity. Orders reduce inventory value at the active average.
 - Under **Branding**, set the store name, logo, background image or color, and theme and text colors. Image uploads accept JPEG, PNG, or WebP files up to 1 MB.
 - Add packages to the cart and adjust quantities. Select **Submit Order** to enter the customer's contact details and log the order. This is an owner action. Orders are written in Philippine pesos to the brand's Orders tab.
 
 ## Storage and stock consistency
 
-Each brand spreadsheet contains Settings, Parts, Packages, and Orders. Images live in the same private brand folder. The browser never chooses a spreadsheet or folder ID for any operation. Brand sessions select the workspace server-side.
+Each brand spreadsheet contains Settings, Parts, Packages, Purchases, and Orders. Existing brand spreadsheets receive the purchase columns and tab the first time they are accessed after the update. Images live in the same private brand folder. Brand sessions select the spreadsheet server-side.
 
 Submit orders and edit stock through the app so they use the same lock. The app adds the required quantities of parts shared by multiple cart items. It submits the order row and stock deductions together in one Sheets batch. A retry with the same order reference returns the existing order. Editing data directly in Sheets can bypass these checks. Keep the root folder private to avoid granting inherited Drive access across brands.

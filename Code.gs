@@ -1,10 +1,14 @@
 const ROOT_NAME = 'Inventory Management System';
 const COLUMNS = {
   Settings: ['Key', 'Value'],
-  Parts: ['ID', 'SKU', 'Part', 'On hand', 'Low threshold', 'Revision'],
+  Parts: ['ID', 'SKU', 'Part', 'On hand', 'Low threshold', 'Revision', 'Supplier name', 'Stock value centavos'],
   Packages: ['ID', 'Package', 'Description', 'Price centavos', 'Recipe JSON', 'Photo file', 'Revision'],
   Orders: ['Order ID', 'Submitted UTC', 'Customer', 'Email', 'Phone', 'Address', 'Notes',
     'Currency', 'Total centavos', 'Packages JSON', 'Components deducted JSON', 'Request ID'],
+  Purchases: ['Purchase ID', 'Recorded UTC', 'Part ID', 'SKU', 'Part', 'Supplier name', 'Purchase type',
+    'Quantity purchased', 'Total centavos', 'Unit cost centavos', 'Stock before receipt',
+    'Value before receipt centavos', 'Stock after receipt', 'Value after receipt centavos',
+    'Weighted average centavos', 'Request ID'],
 };
 const HEX = /^#[0-9a-f]{6}$/i;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -32,6 +36,7 @@ function action(name, token, data) {
       case 'dashboard': return { ok: true, data: dashboard_(tenant) };
       case 'asset': return { ok: true, data: readAsset_(tenant, data) };
       case 'savePart': return { ok: true, data: locked_(() => savePart_(tenant, data)) };
+      case 'purchaseHistory': return { ok: true, data: purchaseHistory_(tenant, data.id) };
       case 'savePackage': return { ok: true, data: locked_(() => savePackage_(tenant, data)) };
       case 'saveBrand': return { ok: true, data: locked_(() => saveBrand_(tenant, data)) };
       case 'submitOrder': return { ok: true, data: locked_(() => submitOrder_(tenant, data)) };
@@ -135,7 +140,7 @@ function createTenant_(email, rawBrand, digest) {
     } }];
   });
   write_(sheet, requests);
-  const tenant = { id, email, brand, digest, folderId: folder.id, sheetId: file.id, generation: 1 };
+  const tenant = { id, email, brand, digest, folderId: folder.id, sheetId: file.id, generation: 1, purchaseSchema: 1 };
   PropertiesService.getScriptProperties().setProperty('tenant:' + id, JSON.stringify(tenant));
   return tenant;
 }
@@ -166,6 +171,7 @@ function signIn_(accessKey) {
 }
 
 function newSession_(tenant) {
+  ensurePurchaseSchema_(tenant);
   const token = randomToken_();
   CacheService.getScriptCache().put('session:' + digest_(token), JSON.stringify([tenant.id, tenant.generation]), SESSION_TTL);
   return { token, ...dashboard_(tenant) };
@@ -177,7 +183,10 @@ function tenantFor_(token) {
   if (raw) {
     const [id, generation] = JSON.parse(raw);
     const tenant = readTenant_(id);
-    if (tenant?.generation === generation) return tenant;
+    if (tenant?.generation === generation) {
+      ensurePurchaseSchema_(tenant);
+      return tenant;
+    }
   }
   fail_('Your session ended. Sign in again.', 'AUTH');
 }
@@ -248,9 +257,31 @@ function write_(sheet, requests) {
   Sheets.Spreadsheets.batchUpdate({ requests }, sheet.id);
 }
 
+function ensurePurchaseSchema_(tenant) {
+  if (tenant.purchaseSchema === 1) return;
+  locked_(() => {
+    const current = readTenant_(tenant.id);
+    if (current.purchaseSchema === 1) return;
+    const sheet = book_(current.sheetId);
+    const existing = sheet.tabs.find(tab => tab.title === 'Purchases');
+    const sheetId = existing?.sheetId ?? Math.max(...sheet.tabs.map(tab => tab.sheetId)) + 1;
+    const requests = existing ? [] : [
+      { addSheet: { properties: { title: 'Purchases', sheetId, gridProperties: { frozenRowCount: 1 } } } },
+      update_(sheetId, 0, 0, [COLUMNS.Purchases]),
+    ];
+    requests.push(update_(sheet.tab('Parts'), 0, 6, [COLUMNS.Parts.slice(6)]));
+    write_(sheet, requests);
+    current.purchaseSchema = 1;
+    PropertiesService.getScriptProperties().setProperty('tenant:' + current.id, JSON.stringify(current));
+  });
+}
+
 function parts_(sheet) {
-  return rows_(sheet, 'Parts').map(([id, sku, name, stock, threshold, revision], index) =>
-    ({ id, sku, name, stock, threshold, revision, index: index + 1 })).filter(part => part.id);
+  return rows_(sheet, 'Parts').map(([id, sku, name, stock, threshold, revision, supplier, value], index) => {
+    const stockValue = stock === 0 ? 0 : Number.isSafeInteger(value) && value >= 0 ? value : null;
+    return { id, sku, name, stock, threshold, revision, supplier: supplier || '', stockValue,
+      averageCost: stock > 0 && stockValue !== null ? stockValue / stock : null, index: index + 1 };
+  }).filter(part => part.id);
 }
 
 function packages_(sheet) {
@@ -285,19 +316,65 @@ function dashboard_(tenant) {
   };
 }
 
+function prorate_(value, stock, quantity) {
+  if (!quantity) return 0;
+  if (value === null || !stock) return null;
+  return Math.floor(value / stock) * quantity + Math.round((value % stock) * quantity / stock);
+}
+
+function purchase_(data, supplier) {
+  if (!data) return null;
+  if (!UUID.test(String(data.key))) fail_('Invalid purchase reference.');
+  if (!supplier) fail_('Enter a supplier name for the purchase.');
+  if (!['Bulk', 'Per Piece'].includes(data.type)) fail_('Choose Bulk or Per Piece.');
+  const quantity = integer_(data.quantity, 'Purchase quantity', 1000000, 1);
+  const price = integer_(data.price, 'Purchase price in centavos', data.type === 'Bulk' ? 1000000000000000 : 1000000000);
+  const value = data.type === 'Bulk' ? price : price * quantity;
+  return { type: data.type, key: data.key, quantity, value, unitCost: value / quantity };
+}
+
 function savePart_(tenant, data) {
   const sheet = book_(tenant.sheetId);
   const tab = sheet.tab('Parts');
+  const supplier = text_(data.supplier, 'supplier name', 120, false);
+  const receipt = purchase_(data.purchase, supplier);
+  if (receipt && values_(sheet, 'Purchases!P2:P').some(([key]) => key === receipt.key)) {
+    return dashboard_(tenant);
+  }
   const records = parts_(sheet);
   const previous = records.find(part => part.id === data.id);
   if (data.id && (!previous || previous.revision !== data.revision)) fail_('The part changed. Reopen it and try again.', 'STALE');
   const sku = text_(data.sku, 'SKU', 40).toUpperCase();
   if (records.some(part => part.sku === sku && part.id !== data.id)) fail_('This SKU is already in use.');
-  const row = [previous?.id || Utilities.getUuid(), sku, text_(data.name, 'part name', 100),
-    integer_(data.stock, 'On hand', 1000000), integer_(data.threshold, 'Low-stock threshold', 1000000),
-    (previous?.revision || 0) + 1];
-  write_(sheet, [previous ? update_(tab, previous.index, 0, [row]) : append_(tab, [row])]);
+  const name = text_(data.name, 'part name', 100);
+  const id = previous?.id || Utilities.getUuid();
+  const before = integer_(data.stock, 'On hand before purchase', 1000000);
+  const threshold = integer_(data.threshold, 'Low-stock threshold', 1000000);
+  let beforeValue = prorate_(previous?.stockValue ?? null, previous?.stock ?? 0, before);
+  if (before && beforeValue === null && data.openingCost != null) {
+    beforeValue = integer_(data.openingCost, 'Opening unit cost in centavos', 1000000000) * before;
+  }
+  if (receipt && beforeValue === null) fail_('Enter the opening unit cost for the remaining stock before logging a purchase.');
+  const stock = integer_(before + (receipt?.quantity || 0), 'Resulting stock', 1000000);
+  const value = receipt ? beforeValue + receipt.value : beforeValue;
+  if (value !== null) integer_(value, 'Resulting stock value in centavos', 1000000000000000);
+  const row = [id, sku, name, stock, threshold, (previous?.revision || 0) + 1, supplier, value ?? ''];
+  const requests = [previous ? update_(tab, previous.index, 0, [row]) : append_(tab, [row])];
+  if (receipt) requests.push(append_(sheet.tab('Purchases'), [[Utilities.getUuid(), new Date().toISOString(),
+    id, sku, name, supplier, receipt.type, receipt.quantity, receipt.value, receipt.unitCost, before, beforeValue,
+    stock, value, value / stock, receipt.key]]));
+  write_(sheet, requests);
   return dashboard_(tenant);
+}
+
+function purchaseHistory_(tenant, id) {
+  if (!UUID.test(String(id))) fail_('Invalid part.');
+  const sheet = book_(tenant.sheetId);
+  if (!parts_(sheet).some(part => part.id === id)) fail_('Part not found.');
+  return rows_(sheet, 'Purchases').filter(row => row[2] === id).slice(-100).reverse().map(row => ({
+    date: row[1], supplier: row[5], type: row[6], quantity: row[7], total: row[8], unitCost: row[9],
+    averageCost: row[14],
+  }));
 }
 
 function savePackage_(tenant, data) {
@@ -405,12 +482,14 @@ function submitOrder_(tenant, data) {
       fail_((part?.name || 'A recipe component') + ' needs ' + quantity + ' units. ' +
         (part?.stock ?? 0) + ' are on hand.', 'STALE');
     }
-    return { id, name: part.name, quantity };
+    return { id, name: part.name, quantity, cost: prorate_(part.stockValue, part.stock, quantity) };
   });
   const tab = sheet.tab('Parts');
-  const requests = deductions.map(({ id, quantity }) => {
+  const requests = deductions.map(({ id, quantity, cost }) => {
     const part = parts.get(id);
-    return update_(tab, part.index, 3, [[part.stock - quantity, part.threshold, part.revision + 1]]);
+    const remaining = part.stock - quantity;
+    const value = remaining === 0 ? 0 : cost === null ? '' : part.stockValue - cost;
+    return update_(tab, part.index, 3, [[remaining, part.threshold, part.revision + 1, part.supplier, value]]);
   });
   const id = Utilities.getUuid();
   requests.push(append_(sheet.tab('Orders'), [[id, new Date().toISOString(), customer, email, phone, address, notes, 'PHP',
