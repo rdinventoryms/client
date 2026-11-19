@@ -33,6 +33,10 @@
     label{display:grid;gap:5px;font-size:.9rem;font-weight:650} input,select,textarea{background:#fff;border:1px solid #a69a8b;border-radius:7px;min-height:42px;padding:7px 10px;color:#29211b;min-width:0;width:100%}textarea{resize:vertical}input[type=color]{padding:3px} .check{display:flex;gap:7px;align-items:center}.check input{width:17px;min-height:0}
     .recipe{display:grid;grid-template-columns:minmax(0,1fr) 82px 37px;gap:8px;align-items:end}.cart-line{display:grid;grid-template-columns:minmax(0,1fr) 72px 38px;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px} .cart-line strong{overflow-wrap:anywhere}
     .purchase-fields{background:#f7f1e8;border:1px solid var(--line);border-radius:9px;padding:12px}
+    .locked-field,.locked-field input{pointer-events:none}.locked-field input{background:#efebe5;color:#625a52}
+    .margin-summary{background:#f7f1e8;border:1px solid var(--line);border-radius:9px;padding:12px}
+    .negative{color:#772f23}.danger{background:#8a3b30;color:#fff}.status-delivery{background:#e2eaf4;color:#334b69}
+    .status-assembling{background:#f4e8d0;color:#705023}
     .history-entry{border-bottom:1px solid var(--line);padding-bottom:11px}.history-entry:last-child{border-bottom:0}
     .alert{color:#772f23;background:#f8e5de;border-radius:8px;padding:9px 12px;font-size:.9rem}.toast{position:fixed;right:16px;bottom:16px;max-width:calc(100% - 32px);background:#30231a;color:#fff;border-radius:8px;padding:10px 16px;box-shadow:0 8px 24px #0003}
     .signin{max-width:440px;padding:23px}.signin h1{font-size:2.3rem}.skip:not(:focus){position:absolute;clip-path:inset(50%)} .skip:focus{position:absolute;background:#fff;padding:8px}
@@ -59,7 +63,8 @@
     const hex = /^#[0-9a-f]{6}$/i;
     const imageURL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
     const defaults = {storeName:'Inventory',accent:'#785032',background:'#faf6ed',ink:'#2d241e'};
-    const state = {data:null,token:null,tab:'packages',cart:new Map(),orderKey:null,assets:new Map(),opener:null};
+    const orderStatuses = ['Order Placed','Assembling','Delivery','Fulfilled'];
+    const state = {data:null,token:null,tab:'packages',orders:null,cart:new Map(),orderKey:null,assets:new Map(),opener:null};
     const button = (label,action,id='',kind='secondary',disabled=false) =>
       '<button type="button" class="btn '+kind+'" data-action="'+action+'" data-id="'+safe(id)+'"'+(disabled?' disabled':'')+'>'+label+'</button>';
 
@@ -148,6 +153,7 @@
     function signInView(message='') {
       session(null);
       state.data = null;
+      state.orders = null;
       state.cart.clear();
       state.orderKey = null;
       state.assets.clear();
@@ -179,10 +185,11 @@
         ['Low-stock parts',parts.filter(part=>part.stock<=part.threshold).length]];
       main.innerHTML='<section><div class="intro"><h1>Inventory dashboard</h1><p class="muted">Manage package recipes, stock, and owner-logged orders.</p></div>'+
         '<div class="metrics">'+metrics.map(([name,count])=>'<div class="metric"><span>'+name+'</span><strong>'+count+'</strong></div>').join('')+
-        '</div><nav class="tabs" aria-label="Workspace">'+[['packages','Packages'],['parts','Inventory parts'],['brand','Branding']].map(([id,label])=>
+        '</div><nav class="tabs" aria-label="Workspace">'+[['packages','Packages'],['parts','Inventory parts'],['orders','Orders'],['brand','Branding']].map(([id,label])=>
           '<button type="button" class="btn secondary" data-action="tab" data-id="'+id+'" aria-pressed="'+(state.tab===id)+'">'+label+'</button>').join('')+
         '</nav><div id="panel"></div></section>';
       if (state.tab==='parts') return renderParts(parts);
+      if (state.tab==='orders') return renderOrders();
       if (state.tab==='brand') return renderBrand(state.data.brand);
       renderPackages(packages);
     }
@@ -216,6 +223,92 @@
         '</tbody></table></div>':'<p class="surface empty">Add your first inventory part to track stock.</p>');
     }
 
+    function renderOrders() {
+      const panel = $('#panel');
+      const head = '<div class="row section-head"><h2>Orders</h2>'+button('Add order','editOrder','','')+'</div>';
+      if (!state.orders) {
+        panel.innerHTML = head+'<p role="status">Loading orders…</p>';
+        const token = state.token;
+        rpc('orders').then(orders=>{
+          if (state.token !== token) return;
+          state.orders = orders;
+          if (state.tab === 'orders') renderOrders();
+        }).catch(error=>{
+          if (state.token !== token || state.tab !== 'orders') return;
+          panel.innerHTML = head+'<p class="alert" role="alert">'+safe(error.message)+'</p>';
+          if (error.code === 'AUTH') fail(error);
+        });
+        return;
+      }
+      const badgeClass = {'Order Placed':'off',Assembling:'status-assembling',Delivery:'status-delivery'};
+      panel.innerHTML = head+(state.orders.length ? '<div class="surface scroll"><table><thead><tr>'+
+        ['Order','Customer','Date','Total','Status','Actions'].map(label=>'<th scope="col">'+label+'</th>').join('')+
+        '</tr></thead><tbody>'+state.orders.map(order=>'<tr><td><strong>'+safe(orderRef(order.id))+'</strong></td><td>'+
+          safe(order.customer)+'</td><td>'+displayDate.format(new Date(order.created))+'</td><td>'+money(order.total)+
+          '</td><td><span class="badge '+(badgeClass[order.status]||'')+'">'+safe(order.status)+'</span></td>'+
+          '<td><div class="actions">'+button('Edit order','editOrder',order.id)+button('Delete','deleteOrder',order.id)+'</div></td></tr>'
+        ).join('')+'</tbody></table></div>' : '<p class="surface empty">No orders have been logged yet.</p>');
+    }
+
+    const orderRef = id => '#'+id.slice(0,8).toUpperCase();
+
+    function orderDetailsFields(order={}) {
+      return '<label>Customer name<input name="customer" maxlength="120" value="'+safe(order.customer)+'" required></label>'+
+        '<div class="pair"><label>Email<input name="email" type="email" maxlength="254" value="'+safe(order.email)+'"></label>'+
+        '<label>Phone<input name="phone" type="tel" maxlength="60" value="'+safe(order.phone)+'"></label></div><p class="muted small">Enter an email or phone number.</p>'+
+        '<label>Address<textarea name="address" rows="2" maxlength="600">'+safe(order.address)+'</textarea></label>'+
+        '<label>Order notes<textarea name="notes" rows="2" maxlength="500">'+safe(order.notes)+'</textarea></label>'+
+        '<label>Order status<select name="status">'+orderStatuses.map(status=>'<option'+
+          (order.status===status?' selected':'')+'>'+status+'</option>').join('')+'</select></label>';
+    }
+
+    function orderLine(line={}) {
+      const option = (id,label) => '<option value="'+safe(id)+'"'+(line.id===id?' selected':'')+'>'+safe(label)+'</option>';
+      const options = state.data.packages.map(kit=>option(kit.id,kit.name));
+      if (line.id && !state.data.packages.some(kit=>kit.id===line.id)) options.push(option(line.id,line.name));
+      return '<div class="recipe" data-order-line><label>Package<select name="packageLine" required><option value="">Choose a package</option>'+
+        options.join('')+'</select></label><label>Quantity<input name="orderQuantity" type="number" min="1" max="99" value="'+
+        (line.quantity||1)+'" required></label><button type="button" class="btn secondary icon" data-action="removeOrderLine" aria-label="Remove package">×</button></div>';
+    }
+
+    function editOrder(id) {
+      const order = state.orders?.find(item=>item.id===id);
+      if (id && !order) return;
+      if (!order && !state.data.packages.length) return notice('Create a package before adding an order.');
+      show(order?'Edit order '+orderRef(order.id):'Add order','<form class="stack" data-form="'+(order?'updateOrder':'submitOrder')+
+        '" data-id="'+safe(id)+'" data-revision="'+(order?.revision||'')+'">'+orderDetailsFields(order)+
+        '<strong>Order packages</strong><div id="order-lines" class="stack">'+(order?.lines||[{}]).map(orderLine).join('')+'</div>'+
+        '<div>'+button('Add package','addOrderLine')+'</div><div class="row"><strong>Order total</strong><output data-order-total>—</output></div>'+
+        '<button class="btn">'+(order?'Save order':'Log order and deduct stock')+'</button></form>');
+      orderEstimate(dialog.querySelector('form'));
+    }
+
+    function readOrderLines(form) {
+      const byId = new Map(state.data.packages.map(kit=>[kit.id,kit]));
+      return [...form.querySelectorAll('[data-order-line]')].map(row=>{
+        const id = row.querySelector('select').value;
+        return {id,revision:byId.get(id)?.revision??null,quantity:row.querySelector('input').valueAsNumber};
+      });
+    }
+
+    function orderEstimate(form) {
+      const order = state.orders?.find(item=>item.id===form.dataset.id);
+      const prices = new Map(state.data.packages.map(kit=>[kit.id,kit.price]));
+      for (const line of order?.lines||[]) prices.set(line.id,line.price);
+      const lines = readOrderLines(form);
+      const ready = lines.every(line=>prices.has(line.id) && Number.isInteger(line.quantity) && line.quantity>=1 && line.quantity<=99);
+      form.querySelector('[data-order-total]').textContent = ready
+        ? money(lines.reduce((sum,line)=>sum+prices.get(line.id)*line.quantity,0)) : '—';
+    }
+
+    function confirmDeleteOrder(id) {
+      const order = state.orders?.find(item=>item.id===id);
+      if (!order) return;
+      show('Delete order '+orderRef(id),'<form class="stack" data-form="deleteOrder" data-id="'+safe(id)+'" data-revision="'+
+        order.revision+'"><p>Deleting this order will return its recorded components to inventory.</p>'+
+        '<div class="actions">'+button('Cancel','close')+'<button class="btn danger">Delete order</button></div></form>');
+    }
+
     const imageInput = name => '<input type="file" name="'+name+'" accept="image/jpeg,image/png,image/webp">';
     function renderBrand(brand) {
       const color = (label,key) => '<label>'+label+'<input name="'+key+'" type="color" value="'+safe(brand[key])+'"></label>';
@@ -233,12 +326,12 @@
     }
 
     function disabledPartField(label, name, value) {
-      return '<label>'+label+'<input name="'+name+'" '+(name==='stock'?'type="number" ':'')+'value="'+safe(value)+'" disabled></label>';
+      return '<label class="locked-field">'+label+'<input name="'+name+'" '+(name==='stock'?'type="number" ':'')+'value="'+safe(value)+'" disabled></label>';
     }
 
-    function purchaseFields(option, required) {
-      return '<label>Purchase Type<select name="purchaseType" '+(required?'required':'')+'><option value="">'+option+
-        '</option><option>Bulk</option><option>Per Item</option></select></label>'+
+    function purchaseFields() {
+      return '<label>Purchase Type<select name="purchaseType" required><option value="">Choose a purchase type</option>'+
+        '<option>Bulk</option><option>Per Item</option></select></label>'+
         '<div class="stack purchase-fields" data-purchase hidden><div class="pair">'+
         '<label><span data-purchase-price-label>Price (₱)</span><input name="purchasePrice" type="number" min="0" step=".01" disabled></label>'+
         '<label><span data-purchase-quantity-label>Quantity Purchased</span><input name="purchaseQuantity" type="number" min="1" max="1000000" disabled></label>'+
@@ -253,12 +346,12 @@
     function addPart() {
       show('Add part',partForm('savePart')+
         '<label>Part Name<input name="name" maxlength="100" required></label>'+
-        '<div class="pair"><label>SKU<input name="sku" maxlength="40" required></label>'+
+        '<div class="pair">'+disabledPartField('SKU','sku','Generated on save')+
         '<label>Supplier Name<input name="supplier" maxlength="120"></label></div><div class="pair">'+
         '<label><span data-stock-label>On Hand</span><input name="stock" type="number" min="0" max="1000000" value="0" required></label>'+
         '<label>Low Stock Threshold<input name="threshold" type="number" min="0" max="1000000" value="5" required></label></div>'+
         openingCostField()+'<p class="muted small">Enter the cost of any units already on hand.</p>'+
-        purchaseFields('No new purchase',false)+'<button class="btn">Save part</button></form>');
+        '<button class="btn">Save part</button></form>');
     }
 
     function editPart(id) {
@@ -286,7 +379,7 @@
       const needsOpeningCost = part.stock > 0 && part.averageCost == null;
       show('Restock',partForm('restockPart',part)+disabledPartField('Part Name','name',part.name)+
         '<div class="pair">'+disabledPartField('SKU','sku',part.sku)+disabledPartField('Current On Hand','stock',part.stock)+'</div>'+
-        purchaseFields('Choose a purchase type',true)+
+        purchaseFields()+
         (needsOpeningCost ? '<p class="alert">Set the opening cost for your existing stock before restocking.</p>'+
           '<div>'+button('Set opening unit cost','openingCost',id)+'</div>' : '')+
         '<div class="actions">'+button('Back','editPart',id)+'<button class="btn" '+(needsOpeningCost?'disabled':'')+'>Save restock</button></div></form>');
@@ -302,19 +395,16 @@
     }
 
     function updatePurchaseFields(form) {
-      const {stock,supplier,purchasePrice,purchaseQuantity,purchaseType} = form.elements;
+      const {stock,purchasePrice,purchaseQuantity,purchaseType} = form.elements;
       const logging = Boolean(purchaseType.value);
       const bulk = purchaseType.value === 'Bulk';
       form.querySelector('[data-purchase]').hidden = !logging;
-      const stockLabel = form.querySelector('[data-stock-label]');
-      if (stockLabel) stockLabel.textContent = logging ? 'On Hand Before Purchase' : 'On Hand';
       form.querySelector('[data-purchase-price-label]').textContent = bulk ? 'Total Price (₱)' : 'Unit Price (₱)';
       form.querySelector('[data-purchase-quantity-label]').textContent = bulk ? 'Total Quantity' : 'Quantity Purchased';
       for (const field of [purchasePrice,purchaseQuantity]) {
         field.disabled = !logging;
         field.required = logging;
       }
-      if (supplier) supplier.required = logging;
       purchasePrice.max = bulk ? '10000000000000' : '10000000';
       if (!logging) return;
       const quantity = purchaseQuantity.valueAsNumber;
@@ -355,11 +445,42 @@
       show(kit?'Edit package':'New package','<form data-form="savePackage" class="stack" data-id="'+safe(id)+'" data-revision="'+(kit?.revision||'')+'">'+
         '<label>Package name<input name="name" maxlength="120" value="'+safe(kit?.name)+'" required></label>'+
         '<label>Description<textarea name="description" maxlength="450" rows="2">'+safe(kit?.description)+'</textarea></label>'+
-        '<div class="pair"><label>Price in PHP (₱)<input name="price" type="number" min="0" max="10000000" step=".01" value="'+
+        '<div class="pair"><label>Selling Price (₱)<input name="price" type="number" min="0" max="10000000" step=".01" value="'+
         (kit?(kit.price/100).toFixed(2):'')+'" required></label><label>Package photo'+imageInput('photo')+'</label></div>'+
         (kit?.hasPhoto?'<label class="check"><input type="checkbox" name="removePhoto">Remove current photo</label>':'')+
         '<strong>Package recipe</strong><div id="recipe" class="stack">'+(kit?.components||[{}]).map(componentRow).join('')+'</div>'+
-        '<div>'+button('Add component','addComponent')+'</div><button class="btn">Save package</button></form>');
+        '<div>'+button('Add component','addComponent')+'</div>'+
+        '<div class="stack margin-summary" aria-live="polite"><div class="row"><strong>Total Material Cost</strong><output data-material-cost>—</output></div>'+
+        '<div class="row"><strong>Profit</strong><output data-profit>—</output></div><p data-cost-message class="muted small" hidden></p></div>'+
+        '<button class="btn">Save package</button></form>');
+      packageMargin(dialog.querySelector('form'));
+    }
+
+    function packageMargin(form) {
+      const parts = new Map(state.data.parts.map(part=>[part.id,part]));
+      const missing = new Set();
+      let amount = 0;
+      let count = 0;
+      let incomplete = false;
+      for (const row of form.querySelectorAll('.recipe')) {
+        const part = parts.get(row.querySelector('select').value);
+        const quantity = row.querySelector('input');
+        if (!part || !quantity.validity.valid) { incomplete = true; continue; }
+        count++;
+        if (part.averageCost == null) missing.add(part.name);
+        else amount += part.averageCost * quantity.valueAsNumber;
+      }
+      const material = count && !missing.size && !incomplete ? Math.round(amount) : null;
+      const price = form.elements.price;
+      const profit = material !== null && Number.isFinite(price.valueAsNumber) && price.validity.valid
+        ? Math.round(price.valueAsNumber*100) - material : null;
+      form.querySelector('[data-material-cost]').textContent = material === null ? '—' : money(material);
+      const profitOutput = form.querySelector('[data-profit]');
+      profitOutput.textContent = profit === null ? '—' : money(profit);
+      profitOutput.classList.toggle('negative',profit !== null && profit < 0);
+      const message = form.querySelector('[data-cost-message]');
+      message.hidden = !missing.size;
+      message.textContent = missing.size ? 'No active unit cost for '+[...missing].join(', ')+'.' : '';
     }
 
     function cartSummary() {
@@ -402,11 +523,8 @@
     function showOrder() {
       const summary=cartSummary();
       if (!summary.lines.length || orderWarning(summary)) return showCart();
-      show('Customer details','<form data-form="submitOrder" class="stack"><div class="row"><strong>Order total</strong><strong>'+
-        money(summary.total)+'</strong></div><label>Customer name<input name="customer" maxlength="120" required></label>'+
-        '<div class="pair"><label>Email<input name="email" type="email" maxlength="254"></label>'+
-        '<label>Phone<input name="phone" type="tel" maxlength="60"></label></div><p class="muted small">Enter an email or phone number.</p>'+
-        '<label>Address<textarea name="address" rows="2" maxlength="600"></textarea></label><label>Order notes<textarea name="notes" rows="2" maxlength="500"></textarea></label>'+
+      show('Customer details','<form data-form="submitOrder" data-source="cart" class="stack"><div class="row"><strong>Order total</strong><strong>'+
+        money(summary.total)+'</strong></div>'+orderDetailsFields()+
         '<button class="btn">Log order and deduct stock</button></form>');
     }
 
@@ -426,9 +544,11 @@
 
     document.addEventListener('input',event=>{
       const field=event.target;
-      if (field.form?.elements.purchaseType && ['stock','purchasePrice','purchaseQuantity'].includes(field.name)) {
+      if (field.form?.elements.purchaseType && ['purchasePrice','purchaseQuantity'].includes(field.name)) {
         updatePurchaseFields(field.form);
       }
+      if (field.form?.dataset.form==='savePackage' && ['price','part','quantity'].includes(field.name)) packageMargin(field.form);
+      if (field.closest('[data-order-line]')) orderEstimate(field.form);
       const id=field.dataset.quantity;
       if (!id) return;
       if (field.checkValidity() && state.cart.get(id).quantity!==field.valueAsNumber) {
@@ -460,21 +580,45 @@
       try {
         switch(action) {
           case 'close': dialog.close(); break;
-          case 'tab': state.tab=id; render(); $('[data-action=tab][data-id="'+id+'"]').focus(); break;
+          case 'tab':
+            state.tab=id;
+            if (id==='orders') state.orders=null;
+            render(); $('[data-action=tab][data-id="'+id+'"]').focus(); break;
           case 'editPart': editPart(id); break;
           case 'editPartInfo': editPartInfo(id); break;
           case 'restockPart': restockPart(id); break;
           case 'openingCost': setOpeningCost(id); break;
           case 'purchaseHistory': await showPurchaseHistory(id); break;
           case 'editPackage': editPackage(id); break;
+          case 'editOrder': editOrder(id); break;
+          case 'deleteOrder': confirmDeleteOrder(id); break;
+          case 'addOrderLine':
+            if ($('#order-lines').children.length<40) {
+              $('#order-lines').insertAdjacentHTML('beforeend',orderLine());
+              $('#order-lines').lastElementChild.querySelector('select').focus();
+              orderEstimate(control.closest('form'));
+            }
+            break;
+          case 'removeOrderLine':
+            if ($('#order-lines').children.length>1) {
+              const form = control.closest('form');
+              control.closest('[data-order-line]').remove();
+              orderEstimate(form);
+            }
+            break;
           case 'addComponent':
             if ($('#recipe').children.length<40) {
               $('#recipe').insertAdjacentHTML('beforeend',componentRow());
               $('#recipe').lastElementChild.querySelector('select').focus();
+              packageMargin(control.closest('form'));
             }
             break;
           case 'removeComponent':
-            if ($('#recipe').children.length>1) control.closest('.recipe').remove();
+            if ($('#recipe').children.length>1) {
+              const form = control.closest('form');
+              control.closest('.recipe').remove();
+              packageMargin(form);
+            }
             break;
           case 'add': {
             const kit=state.data.packages.find(item=>item.id===id);
@@ -506,16 +650,28 @@
           return;
         }
         if (name==='submitOrder') {
-          const summary=cartSummary();
-          if (!summary.lines.length||orderWarning(summary)) throw new Error('Review quantities in your cart first.');
-          state.orderKey ||= crypto.randomUUID();
-          const result=await rpc(name,{...data,key:state.orderKey,lines:summary.lines.map(({kit,id,quantity})=>({id,quantity,revision:kit.revision}))});
-          state.cart.clear(); state.orderKey=null; accept(result.dashboard);
-          show('Order logged','<div class="stack"><p>Order <strong>'+safe(result.id.slice(0,8).toUpperCase())+
+          const fromCart = form.dataset.source==='cart';
+          if (fromCart) {
+            const summary=cartSummary();
+            if (!summary.lines.length||orderWarning(summary)) throw new Error('Review quantities in your cart first.');
+            state.orderKey ||= crypto.randomUUID();
+            data.key=state.orderKey;
+            data.lines=summary.lines.map(({kit,id,quantity})=>({id,quantity,revision:kit.revision}));
+          } else {
+            form.dataset.orderKey ||= crypto.randomUUID();
+            data.key=form.dataset.orderKey;
+            data.lines=readOrderLines(form);
+          }
+          const result=await rpc(name,data);
+          if (fromCart) { state.cart.clear(); state.orderKey=null; }
+          state.orders=null;
+          accept(result.dashboard);
+          show('Order logged','<div class="stack"><p>Order <strong>'+safe(orderRef(result.id))+
             '</strong> was saved and component stock was deducted.</p><strong>'+money(result.total)+'</strong>'+button('Done','close')+'</div>');
           return;
         }
         if (form.dataset.id) { data.id=form.dataset.id; data.revision=Number(form.dataset.revision); }
+        if (name==='updateOrder') data.lines=readOrderLines(form);
         if (name==='savePart' || name==='editPartInfo') {
           data.stock=Number(data.stock);
           data.threshold=Number(data.threshold);
@@ -523,12 +679,10 @@
         if (name==='savePart' || name==='setPartOpeningCost') {
           data.openingCost=data.openingCost!=='' ? Math.round(Number(data.openingCost)*100) : null;
         }
-        if (name==='savePart' || name==='restockPart') {
-          if (data.purchaseType) {
-            form.dataset.purchaseKey ||= crypto.randomUUID();
-            data.purchase={key:form.dataset.purchaseKey,type:data.purchaseType,quantity:Number(data.purchaseQuantity),
-              price:Math.round(Number(data.purchasePrice)*100)};
-          }
+        if (name==='restockPart') {
+          form.dataset.purchaseKey ||= crypto.randomUUID();
+          data.purchase={key:form.dataset.purchaseKey,type:data.purchaseType,quantity:Number(data.purchaseQuantity),
+            price:Math.round(Number(data.purchasePrice)*100)};
           delete data.purchaseType; delete data.purchaseQuantity; delete data.purchasePrice;
         }
         if (name==='savePackage') {
@@ -540,6 +694,7 @@
         }
         if (name==='saveBrand') { [data.logo,data.backdrop]=await Promise.all([image(data.logo),image(data.backdrop)]); }
         const result=await rpc(name,data);
+        if (name==='updateOrder' || name==='deleteOrder') state.orders=null;
         if (name==='savePackage' || name==='saveBrand') state.assets.clear();
         if (name==='setPartOpeningCost') {
           accept(result);
@@ -548,11 +703,16 @@
         }
         if (dialog.open) dialog.close();
         accept(result);
-        const notices = {saveBrand:'Branding saved.',savePart:'Part saved.',editPartInfo:'Part info saved.',restockPart:'Restock saved.',savePackage:'Package saved.'};
+        const notices = {saveBrand:'Branding saved.',savePart:'Part saved.',editPartInfo:'Part info saved.',
+          restockPart:'Restock saved.',savePackage:'Package saved.',updateOrder:'Order updated.',deleteOrder:'Order deleted and stock returned.'};
         notice(notices[name]);
       } catch(error) {
-        if (error.code==='STALE' && name==='submitOrder') {
-          try { accept(await rpc('dashboard')); showCart(); } catch {}
+        if (error.code==='STALE' && ['submitOrder','updateOrder','deleteOrder'].includes(name)) {
+          try {
+            state.orders=null;
+            accept(await rpc('dashboard'));
+            if (form.dataset.source==='cart') showCart();
+          } catch {}
         }
         fail(error);
       } finally { submit.disabled=false; }

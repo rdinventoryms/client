@@ -39,15 +39,17 @@ The manifest uses the per-file Drive scope, which grants access to files the app
 
 ## Daily use
 
-- Add individual components under **Inventory parts**, then build packages from those components. Package prices are stored in centavos and displayed in Philippine pesos.
+- Add individual components under **Inventory parts**. A new part gets a unique SKU prefixed with the current store name's uppercase initials, using up to three letters. A single-word store uses its first three letters. Enter any opening stock and its unit cost, then use **Restock** for purchases.
+- In **Add/Edit Package**, enter a selling price and choose the components and quantities. The form totals their active weighted-average unit costs and subtracts the material cost from the selling price to show profit. Parts without an active unit cost leave the total and profit undetermined.
 - Choose **Edit Part → Edit Part Info** to correct the part name, counted stock, or low-stock threshold. The SKU and supplier are displayed as read-only values. These corrections do not add a purchase entry.
 - Choose **Edit Part → Restock** to record a delivery. Use **Bulk** for total price and total quantity, or **Per Item** for unit price and quantity purchased. The app adds the purchased quantity to current stock and logs the part's saved supplier. If older stock lacks a recorded value, use **Set opening unit cost** before saving the restock. Older parts without a saved supplier can still be restocked and are shown as “Supplier not recorded” in the history.
 - Open **Price history** to see recent purchases for a part. The **Purchases** tab contains the full supplier, quantity, unit cost, and weighted-average history. The active unit cost is the remaining inventory value plus the purchase value, divided by the combined quantity. Orders reduce inventory value at the active average.
 - Under **Branding**, set the store name, logo, background image or color, and theme and text colors. Image uploads accept JPEG, PNG, or WebP files up to 1 MB.
-- Add packages to the cart and adjust quantities. Select **Submit Order** to enter the customer's contact details and log the order. This is an owner action. Orders are written in Philippine pesos to the brand's Orders tab.
+- Create an order from **Orders → Add order** or submit the cart. The **Orders** tab supports editing customer details, changing packages or quantities, and assigning **Order Placed**, **Assembling**, **Delivery**, or **Fulfilled**. Orders recorded before status tracking open as **Order Placed**.
+- Contact and status changes preserve the original order lines and deductions. Package and quantity changes use current recipes and reconcile the component difference, while retaining the original selling price for packages already in the order. Deleting an order returns its recorded components to stock and archives the order row in the brand's Sheet.
 
 ## Storage and stock consistency
 
-Each brand spreadsheet contains Settings, Parts, Packages, Purchases, and Orders. Existing brand spreadsheets receive the purchase columns and tab the first time they are accessed after the update. Images live in the same private brand folder. Brand sessions select the spreadsheet server-side.
+Each brand spreadsheet contains Settings, Parts, Packages, Purchases, and Orders. Existing brand spreadsheets receive new columns on their first access after an update. Images live in the same private brand folder. Brand sessions select the spreadsheet server-side.
 
 Submit orders and edit stock through the app so they use the same lock. The app adds the required quantities of parts shared by multiple cart items. It submits the order row and stock deductions together in one Sheets batch. A retry with the same order reference returns the existing order. Editing data directly in Sheets can bypass these checks. Keep the root folder private to avoid granting inherited Drive access across brands.

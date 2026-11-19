@@ -4,7 +4,7 @@ const COLUMNS = {
   Parts: ['ID', 'SKU', 'Part', 'On hand', 'Low threshold', 'Revision', 'Supplier name', 'Stock value centavos'],
   Packages: ['ID', 'Package', 'Description', 'Price centavos', 'Recipe JSON', 'Photo file', 'Revision'],
   Orders: ['Order ID', 'Submitted UTC', 'Customer', 'Email', 'Phone', 'Address', 'Notes',
-    'Currency', 'Total centavos', 'Packages JSON', 'Components deducted JSON', 'Request ID'],
+    'Currency', 'Total centavos', 'Packages JSON', 'Components deducted JSON', 'Request ID', 'Status', 'Revision', 'Deleted UTC'],
   Purchases: ['Purchase ID', 'Recorded UTC', 'Part ID', 'SKU', 'Part', 'Supplier name', 'Purchase type',
     'Quantity purchased', 'Total centavos', 'Unit cost centavos', 'Stock before receipt',
     'Value before receipt centavos', 'Stock after receipt', 'Value after receipt centavos',
@@ -14,6 +14,7 @@ const HEX = /^#[0-9a-f]{6}$/i;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SESSION_TTL = 21600;
+const ORDER_STATUSES = ['Order Placed', 'Assembling', 'Delivery', 'Fulfilled'];
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Index').setTitle('Inventory Management System')
@@ -43,6 +44,9 @@ function action(name, token, data) {
       case 'savePackage': return { ok: true, data: locked_(() => savePackage_(tenant, data)) };
       case 'saveBrand': return { ok: true, data: locked_(() => saveBrand_(tenant, data)) };
       case 'submitOrder': return { ok: true, data: locked_(() => submitOrder_(tenant, data)) };
+      case 'orders': return { ok: true, data: listOrders_(tenant) };
+      case 'updateOrder': return { ok: true, data: locked_(() => updateOrder_(tenant, data)) };
+      case 'deleteOrder': return { ok: true, data: locked_(() => deleteOrder_(tenant, data)) };
       default: fail_('Action unavailable.');
     }
   } catch (error) {
@@ -143,7 +147,7 @@ function createTenant_(email, rawBrand, digest) {
     } }];
   });
   write_(sheet, requests);
-  const tenant = { id, email, brand, digest, folderId: folder.id, sheetId: file.id, generation: 1, purchaseSchema: 1 };
+  const tenant = { id, email, brand, digest, folderId: folder.id, sheetId: file.id, generation: 1, purchaseSchema: 1, orderSchema: 1 };
   PropertiesService.getScriptProperties().setProperty('tenant:' + id, JSON.stringify(tenant));
   return tenant;
 }
@@ -174,7 +178,7 @@ function signIn_(accessKey) {
 }
 
 function newSession_(tenant) {
-  ensurePurchaseSchema_(tenant);
+  ensureWorkspaceSchema_(tenant);
   const token = randomToken_();
   CacheService.getScriptCache().put('session:' + digest_(token), JSON.stringify([tenant.id, tenant.generation]), SESSION_TTL);
   return { token, ...dashboard_(tenant) };
@@ -187,7 +191,7 @@ function tenantFor_(token) {
     const [id, generation] = JSON.parse(raw);
     const tenant = readTenant_(id);
     if (tenant?.generation === generation) {
-      ensurePurchaseSchema_(tenant);
+      ensureWorkspaceSchema_(tenant);
       return tenant;
     }
   }
@@ -260,21 +264,25 @@ function write_(sheet, requests) {
   Sheets.Spreadsheets.batchUpdate({ requests }, sheet.id);
 }
 
-function ensurePurchaseSchema_(tenant) {
-  if (tenant.purchaseSchema === 1) return;
+function ensureWorkspaceSchema_(tenant) {
+  if (tenant.purchaseSchema === 1 && tenant.orderSchema === 1) return;
   locked_(() => {
     const current = readTenant_(tenant.id);
-    if (current.purchaseSchema === 1) return;
+    if (current.purchaseSchema === 1 && current.orderSchema === 1) return;
     const sheet = book_(current.sheetId);
-    const existing = sheet.tabs.find(tab => tab.title === 'Purchases');
-    const sheetId = existing?.sheetId ?? Math.max(...sheet.tabs.map(tab => tab.sheetId)) + 1;
-    const requests = existing ? [] : [
-      { addSheet: { properties: { title: 'Purchases', sheetId, gridProperties: { frozenRowCount: 1 } } } },
-      update_(sheetId, 0, 0, [COLUMNS.Purchases]),
-    ];
-    requests.push(update_(sheet.tab('Parts'), 0, 6, [COLUMNS.Parts.slice(6)]));
+    const requests = [];
+    if (current.purchaseSchema !== 1) {
+      if (!sheet.tabs.some(tab => tab.title === 'Purchases')) {
+        const sheetId = Math.max(...sheet.tabs.map(tab => tab.sheetId)) + 1;
+        requests.push({ addSheet: { properties: { title: 'Purchases', sheetId, gridProperties: { frozenRowCount: 1 } } } },
+          update_(sheetId, 0, 0, [COLUMNS.Purchases]));
+      }
+      requests.push(update_(sheet.tab('Parts'), 0, 6, [COLUMNS.Parts.slice(6)]));
+    }
+    if (current.orderSchema !== 1) requests.push(update_(sheet.tab('Orders'), 0, 12, [COLUMNS.Orders.slice(12)]));
     write_(sheet, requests);
     current.purchaseSchema = 1;
+    current.orderSchema = 1;
     PropertiesService.getScriptProperties().setProperty('tenant:' + current.id, JSON.stringify(current));
   });
 }
@@ -336,19 +344,27 @@ function purchase_(data) {
 
 function savePart_(tenant, data) {
   if (data.id) fail_('Refresh the app and choose Edit Part Info or Restock.');
+  if (data.purchase) fail_('Add the part first, then use Restock to log a purchase.');
   const sheet = book_(tenant.sheetId);
   const supplier = text_(data.supplier, 'supplier name', 120, false);
-  const receipt = data.purchase ? purchase_(data.purchase) : null;
-  if (receipt && !supplier) fail_('Enter a supplier name for the purchase.');
-  if (receipt && receiptExists_(sheet, receipt.key)) return dashboard_(tenant);
-  const sku = text_(data.sku, 'SKU', 40).toUpperCase();
-  if (parts_(sheet).some(part => part.sku === sku)) fail_('This SKU is already in use.');
+  const sku = generateSku_(settings_(sheet).storeName || tenant.brand, parts_(sheet));
   const name = text_(data.name, 'part name', 100);
   const stock = integer_(data.stock, 'On hand', 1000000);
   const threshold = integer_(data.threshold, 'Low-stock threshold', 1000000);
   const stockValue = !stock ? 0 : data.openingCost == null ? null : openingValue_(data.openingCost, stock);
-  writePart_(sheet, { id: Utilities.getUuid(), sku, name, stock, threshold, supplier, stockValue, revision: 0 }, receipt);
+  writePart_(sheet, { id: Utilities.getUuid(), sku, name, stock, threshold, supplier, stockValue, revision: 0 }, null);
   return dashboard_(tenant);
+}
+
+function generateSku_(brand, parts) {
+  const words = brand.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().match(/[A-Z0-9]+/g) || [];
+  const prefix = words.length > 1 ? words.slice(0, 3).map(word => word[0]).join('') : (words[0] || 'SKU').slice(0, 3);
+  const used = new Set(parts.map(part => String(part.sku).toUpperCase()));
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const sku = prefix + '-' + Utilities.getUuid().replace(/-/g, '').slice(0, 9).toUpperCase();
+    if (!used.has(sku)) return sku;
+  }
+  fail_('A unique SKU could not be generated. Please try again.');
 }
 
 function currentPart_(sheet, data) {
@@ -487,56 +503,152 @@ function readAsset_(tenant, data) {
   return 'data:' + file.mimeType + ';base64,' + Utilities.base64Encode(response.getContent());
 }
 
-function submitOrder_(tenant, data) {
-  const sheet = book_(tenant.sheetId);
-  if (!UUID.test(String(data.key))) fail_('Invalid order reference.');
-  const duplicate = values_(sheet, 'Orders!L2:L').findIndex(([key]) => key === data.key);
-  if (duplicate >= 0) {
-    const rowNumber = duplicate + 2;
-    const [row] = values_(sheet, 'Orders!A' + rowNumber + ':I' + rowNumber);
-    return { id: row[0], total: row[8], dashboard: dashboard_(tenant) };
-  }
+function orderRecords_(sheet) {
+  return rows_(sheet, 'Orders').flatMap(([id, created, customer, email, phone, address, notes, currency, total,
+    lines, deductions, key, status, revision, deleted], row) => id ? [{
+      id, created, customer, email, phone, address, notes, currency, total,
+      lines: JSON.parse(lines || '[]'), deductions: JSON.parse(deductions || '[]'), key,
+      status: status || ORDER_STATUSES[0], revision: revision || 1, deleted: deleted || '', index: row + 1,
+    }] : []);
+}
+
+function listOrders_(tenant) {
+  return orderRecords_(book_(tenant.sheetId)).reverse().filter(order => !order.deleted)
+    .map(({ deductions, key, index, deleted, ...order }) => order);
+}
+
+function orderDetails_(data) {
   const customer = text_(data.customer, 'customer name', 120);
   const email = text_(data.email, 'customer email', 254, false);
   const phone = text_(data.phone, 'phone number', 60, false);
   if (email && !EMAIL.test(email)) fail_('Enter a valid customer email.');
   if (!email && !phone) fail_('Enter a customer email or phone number.');
-  const address = text_(data.address, 'address', 600, false);
-  const notes = text_(data.notes, 'order notes', 500, false);
+  const status = data.status ?? ORDER_STATUSES[0];
+  if (!ORDER_STATUSES.includes(status)) fail_('Choose a valid order status.');
+  return { customer, email, phone, status, address: text_(data.address, 'address', 600, false),
+    notes: text_(data.notes, 'order notes', 500, false) };
+}
+
+function orderLines_(data) {
   if (!Array.isArray(data.lines) || data.lines.length < 1 || data.lines.length > 40) fail_('Choose 1 to 40 packages.');
-  const packages = new Map(packages_(sheet).map(kit => [kit.id, kit]));
-  const parts = new Map(parts_(sheet).map(part => [part.id, part]));
-  const used = new Map();
   const seen = new Set();
-  let total = 0;
-  const lines = data.lines.map(line => {
-    const kit = packages.get(line.id);
-    if (!kit || seen.has(line.id)) fail_('A package in the cart is unavailable.', 'STALE');
-    if (line.revision !== kit.revision) fail_('A package changed. Review the cart and submit again.', 'STALE');
+  return data.lines.map(line => {
+    if (!line || !UUID.test(String(line.id)) || seen.has(line.id)) fail_('Choose a different package for each row.');
     seen.add(line.id);
-    const quantity = integer_(line.quantity, 'Package quantity', 99, 1);
-    total += kit.price * quantity;
-    for (const entry of kit.recipe) used.set(entry.id, (used.get(entry.id) || 0) + entry.quantity * quantity);
-    return { id: kit.id, name: kit.name, price: kit.price, quantity };
+    return { id: line.id, revision: line.revision, quantity: integer_(line.quantity, 'Package quantity', 99, 1) };
   });
-  const deductions = [...used].map(([id, quantity]) => {
-    const part = parts.get(id);
-    if (!part || part.stock < quantity) {
-      fail_((part?.name || 'A recipe component') + ' needs ' + quantity + ' units. ' +
-        (part?.stock ?? 0) + ' are on hand.', 'STALE');
+}
+
+function prepareOrder_(sheet, selected, previous = []) {
+  const packages = new Map(packages_(sheet).map(kit => [kit.id, kit]));
+  const original = new Map(previous.map(line => [line.id, line]));
+  const required = new Map();
+  let total = 0;
+  const lines = selected.map(({ id, revision, quantity }) => {
+    const kit = packages.get(id);
+    if (!kit || revision !== kit.revision) fail_('A package changed or is unavailable. Reopen the order and try again.', 'STALE');
+    const price = original.get(id)?.price ?? kit.price;
+    total += price * quantity;
+    for (const component of kit.recipe) {
+      required.set(component.id, (required.get(component.id) || 0) + component.quantity * quantity);
     }
-    return { id, name: part.name, quantity, cost: prorate_(part.stockValue, part.stock, quantity) };
+    return { id, name: kit.name, price, quantity };
   });
+  return { lines, total, required };
+}
+
+function balanceOrderStock_(sheet, prior, required) {
+  const parts = new Map(parts_(sheet).map(part => [part.id, part]));
+  const previous = new Map(prior.map(item => [item.id, item]));
   const tab = sheet.tab('Parts');
-  const requests = deductions.map(({ id, quantity, cost }) => {
+  const deductions = [];
+  const requests = [];
+  for (const id of new Set([...required.keys(), ...previous.keys()])) {
     const part = parts.get(id);
-    const remaining = part.stock - quantity;
-    const value = remaining === 0 ? 0 : cost === null ? '' : part.stockValue - cost;
-    return update_(tab, part.index, 3, [[remaining, part.threshold, part.revision + 1, part.supplier, value]]);
-  });
-  const id = Utilities.getUuid();
-  requests.push(append_(sheet.tab('Orders'), [[id, new Date().toISOString(), customer, email, phone, address, notes, 'PHP',
-    total, JSON.stringify(lines), JSON.stringify(deductions), data.key]]));
+    const old = previous.get(id);
+    const quantity = required.get(id) || 0;
+    const oldQuantity = old?.quantity || 0;
+    const oldCost = oldQuantity ? (Number.isSafeInteger(old.cost) ? old.cost : null) : 0;
+    const change = quantity - oldQuantity;
+    let cost = oldCost;
+    if (change) {
+      if (!part) fail_('An order component is missing from inventory.', 'STALE');
+      if (part.stock < change) {
+        fail_(part.name + ' needs ' + change + ' more units. ' + part.stock + ' are on hand.', 'STALE');
+      }
+      const stock = integer_(part.stock - change, 'Resulting stock', 1000000);
+      const consumed = change > 0
+        ? prorate_(part.stockValue, part.stock, change)
+        : oldCost === null ? null : -prorate_(oldCost, oldQuantity, -change);
+      cost = oldCost === null || consumed === null ? null : oldCost + consumed;
+      const value = stock === 0 ? 0 : consumed === null || part.stockValue === null
+        ? null : part.stockValue - consumed;
+      if (value !== null) integer_(value, 'Resulting stock value in centavos', 1000000000000000);
+      requests.push(update_(tab, part.index, 3, [[stock, part.threshold, part.revision + 1, part.supplier, value ?? '']]));
+    }
+    if (quantity) deductions.push({ id, name: part?.name || old?.name || 'Missing part', quantity, cost });
+  }
+  return { requests, deductions };
+}
+
+function orderCells_(order) {
+  return [order.id, order.created, order.customer, order.email || '', order.phone || '', order.address || '',
+    order.notes || '', order.currency, order.total, JSON.stringify(order.lines), JSON.stringify(order.deductions),
+    order.key, order.status, order.revision, order.deleted || ''];
+}
+
+function existingOrder_(sheet, data) {
+  const order = orderRecords_(sheet).find(record => record.id === data.id);
+  if (!order || (!order.deleted && order.revision !== data.revision)) {
+    fail_('The order changed. Refresh Orders and try again.', 'STALE');
+  }
+  return order;
+}
+
+function submitOrder_(tenant, data) {
+  const sheet = book_(tenant.sheetId);
+  if (!UUID.test(String(data.key))) fail_('Invalid order reference.');
+  const duplicate = orderRecords_(sheet).find(order => order.key === data.key);
+  if (duplicate) {
+    if (duplicate.deleted) fail_('This order was already deleted.');
+    return { id: duplicate.id, total: duplicate.total, dashboard: dashboard_(tenant) };
+  }
+  const details = orderDetails_(data);
+  const { lines, total, required } = prepareOrder_(sheet, orderLines_(data));
+  const { requests, deductions } = balanceOrderStock_(sheet, [], required);
+  const order = { ...details, id: Utilities.getUuid(), created: new Date().toISOString(), currency: 'PHP',
+    key: data.key, revision: 1, lines, total, deductions };
+  requests.push(append_(sheet.tab('Orders'), [orderCells_(order)]));
   write_(sheet, requests);
-  return { id, total, dashboard: dashboard_(tenant) };
+  return { id: order.id, total, dashboard: dashboard_(tenant) };
+}
+
+function updateOrder_(tenant, data) {
+  const sheet = book_(tenant.sheetId);
+  const old = existingOrder_(sheet, data);
+  if (old.deleted) fail_('This order was already deleted.', 'STALE');
+  const order = { ...old, ...orderDetails_(data), revision: old.revision + 1 };
+  const lines = orderLines_(data);
+  const quantities = new Map(old.lines.map(line => [line.id, line.quantity]));
+  const unchanged = lines.length === old.lines.length && lines.every(line => quantities.get(line.id) === line.quantity);
+  let requests = [];
+  if (!unchanged) {
+    const updated = prepareOrder_(sheet, lines, old.lines);
+    const balance = balanceOrderStock_(sheet, old.deductions, updated.required);
+    Object.assign(order, { lines: updated.lines, total: updated.total, deductions: balance.deductions });
+    requests = balance.requests;
+  }
+  requests.push(update_(sheet.tab('Orders'), old.index, 0, [orderCells_(order)]));
+  write_(sheet, requests);
+  return dashboard_(tenant);
+}
+
+function deleteOrder_(tenant, data) {
+  const sheet = book_(tenant.sheetId);
+  const order = existingOrder_(sheet, data);
+  if (order.deleted) return dashboard_(tenant);
+  const { requests } = balanceOrderStock_(sheet, order.deductions, new Map());
+  requests.push(update_(sheet.tab('Orders'), order.index, 13, [[order.revision + 1, new Date().toISOString()]]));
+  write_(sheet, requests);
+  return dashboard_(tenant);
 }
