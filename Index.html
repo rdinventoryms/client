@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root{--accent:#785032;--button-text:#fff;--paper:#faf6ed;--ink:#2d241e;--line:#ddd4c9;--surface:#fffdf9;--muted:#605852;--backdrop:none;color-scheme:light}
+    *{box-sizing:border-box} [hidden]{display:none!important}
+    body{margin:0;background:linear-gradient(120deg,color-mix(in srgb,var(--paper) 93%,transparent),color-mix(in srgb,var(--paper) 83%,transparent)),var(--backdrop) center/cover fixed,var(--paper);color:var(--ink);font:16px/1.5 system-ui,sans-serif;min-height:100vh}
+    h1,h2,h3,p{margin:0} h1,h2,h3{line-height:1.05;font-family:Georgia,serif;font-weight:500;letter-spacing:-.025em}
+    h1{font-size:clamp(2.5rem,5vw,4.1rem)} h2{font-size:2rem} h3{font-size:1.56rem;overflow-wrap:anywhere}
+    button,input,select,textarea{font:inherit} button{cursor:pointer} button:disabled{opacity:.55;cursor:default}
+    :focus-visible{outline:2px solid #765331;outline-offset:3px} .wrap{width:min(1250px,calc(100% - 52px));margin-inline:auto}
+    header{background:var(--surface);color:#2d241e;border-bottom:1px solid var(--line)} .bar{min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding-block:10px}
+    .brand{display:flex;align-items:center;gap:10px;min-width:0}.brand strong{font:600 1.55rem/1.05 Georgia,serif;overflow-wrap:anywhere}
+    #logo,.mark{width:39px;height:39px;border-radius:10px;flex-shrink:0}.mark{display:grid;place-items:center;background:var(--accent);color:var(--button-text);font:600 1.25rem Georgia,serif} #logo{object-fit:contain}
+    .actions,.tabs,.row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.row{justify-content:space-between}
+    main{padding-block:34px 58px}.intro{display:grid;gap:8px;margin-bottom:24px}
+    .muted{color:var(--muted)}.intro .muted{color:inherit}.small{font-size:.875rem}.btn{min-height:42px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 14px;border-radius:8px;background:var(--accent);border:1px solid transparent;color:var(--button-text);font-size:.9rem;font-weight:650;line-height:1.25}
+    .btn:not(:disabled):hover{filter:brightness(.92)}.secondary{background:var(--surface);color:#32271f;border-color:var(--line)}.icon{padding:6px 10px}
+    .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:23px}
+    .metric{background:var(--surface);color:#2d241e;border:1px solid var(--line);border-radius:12px;padding:13px 16px;display:grid;gap:5px}.metric strong{font:500 2rem Georgia,serif}
+    .tabs{border-bottom:1px solid color-mix(in srgb,var(--ink) 23%,transparent);padding-bottom:12px;margin-bottom:16px}.tabs .btn[aria-pressed=true]{background:var(--accent);color:var(--button-text)}
+    .section-head{margin-block:0 15px}.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .tile{border:1px solid var(--line);background:var(--surface);color:#2d241e;border-radius:15px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 7px 22px #24180c0b}
+    .tile-cover{width:100%;height:151px;object-fit:cover;display:block;background:#e5dbcc}.tile-cover[hidden]{display:none}.tile-body{padding:17px;display:grid;gap:8px;align-content:start;flex:1}.tile-actions{padding:0 17px 17px}.price{font-weight:750;font-size:1.05rem}
+    .off{background:#eeece8;border-color:#cbc6bd}.off .tile-cover{filter:grayscale(1)}.badge{display:inline-flex;width:fit-content;border-radius:40px;padding:3px 9px;background:#e6efe3;color:#305537;font-weight:650;font-size:.83rem}.badge.off{background:#ddd9d2;color:#4c4842}
+    .shortages{margin:0;padding-left:20px;font-size:.875rem}.surface{background:var(--surface);color:#2d241e;border:1px solid var(--line);border-radius:12px}.empty{padding:22px}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left;white-space:nowrap}
+    th,td{border-bottom:1px solid var(--line);padding:10px 15px}th{background:#f2eadf;font-size:.875rem}tbody tr:last-child td{border:0}
+    dialog{width:min(610px,calc(100% - 24px));max-height:calc(100dvh - 24px);margin:auto;padding:22px;border:1px solid var(--line);border-radius:16px;background:var(--surface);color:#2d241e;box-shadow:0 22px 85px #30241b36}
+    dialog::backdrop{background:#2c211bb0}.dialog-head{margin-bottom:16px;align-items:start}.stack{display:grid;gap:13px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    label{display:grid;gap:5px;font-size:.9rem;font-weight:650} input,select,textarea{background:#fff;border:1px solid #a69a8b;border-radius:7px;min-height:42px;padding:7px 10px;color:#29211b;min-width:0;width:100%}textarea{resize:vertical}input[type=color]{padding:3px} .check{display:flex;gap:7px;align-items:center}.check input{width:17px;min-height:0}
+    .recipe{display:grid;grid-template-columns:minmax(0,1fr) 82px 37px;gap:8px;align-items:end}.cart-line{display:grid;grid-template-columns:minmax(0,1fr) 72px 38px;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px} .cart-line strong{overflow-wrap:anywhere}
+    .alert{color:#772f23;background:#f8e5de;border-radius:8px;padding:9px 12px;font-size:.9rem}.toast{position:fixed;right:16px;bottom:16px;max-width:calc(100% - 32px);background:#30231a;color:#fff;border-radius:8px;padding:10px 16px;box-shadow:0 8px 24px #0003}
+    .signin{max-width:440px;padding:23px}.signin h1{font-size:2.3rem}.skip:not(:focus){position:absolute;clip-path:inset(50%)} .skip:focus{position:absolute;background:#fff;padding:8px}
+    @media(max-width:850px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:550px){.wrap{width:calc(100% - 28px)}main{padding-top:24px}.tiles{grid-template-columns:1fr}.metric{padding:10px}.metric span{font-size:.78rem}.brand strong{font-size:1.2rem}.actions{gap:5px}.bar .btn{padding-inline:8px}.pair{gap:7px}}
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main" target="_self">Skip to inventory</a>
+  <header><div class="wrap bar"><div class="brand"><span id="mark" class="mark" aria-hidden="true">I</span><img id="logo" alt="" hidden><strong id="brand">Inventory</strong></div><div id="header-actions" class="actions"></div></div></header>
+  <main id="main" class="wrap" tabindex="-1"><p role="status">Loading inventory…</p></main>
+  <dialog id="dialog" aria-labelledby="dialog-title"></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script>
+    const $ = selector => document.querySelector(selector);
+    const main = $('#main');
+    const dialog = $('#dialog');
+    const money = amount => new Intl.NumberFormat('en-PH',{style:'currency',currency:'PHP'}).format(amount/100);
+    const safe = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
+    const hex = /^#[0-9a-f]{6}$/i;
+    const imageURL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
+    const defaults = {storeName:'Inventory',accent:'#785032',background:'#faf6ed',ink:'#2d241e'};
+    const state = {data:null,token:null,tab:'packages',cart:new Map(),orderKey:null,assets:new Map(),opener:null};
+    const button = (label,action,id='',kind='secondary',disabled=false) =>
+      '<button type="button" class="btn '+kind+'" data-action="'+action+'" data-id="'+safe(id)+'"'+(disabled?' disabled':'')+'>'+label+'</button>';
+
+    function rpc(name, data, token = state.token) {
+      return new Promise((resolve,reject) => {
+        google.script.run.withFailureHandler(() => reject(new Error('Could not reach Apps Script. Try again.')))
+          .withSuccessHandler(result => {
+            if (result.ok) resolve(result.data);
+            else reject(Object.assign(new Error(result.error),{code:result.code}));
+          }).action(name,token,data ?? null);
+      });
+    }
+
+    function session(token) {
+      state.token = token;
+      try {
+        if (token) sessionStorage.setItem('inventory-session',token);
+        else sessionStorage.removeItem('inventory-session');
+      } catch {}
+    }
+
+    function notice(text) {
+      const node = $('#toast');
+      node.textContent = text;
+      node.hidden = false;
+      clearTimeout(notice.timer);
+      notice.timer = setTimeout(() => { node.hidden = true; },4300);
+    }
+
+    function show(title, contents) {
+      if (!dialog.open) state.opener = document.activeElement;
+      dialog.innerHTML = '<div class="row dialog-head"><h2 id="dialog-title">'+safe(title)+'</h2>'+
+        '<button type="button" class="btn secondary icon" data-action="close" aria-label="Close">×</button></div>'+
+        '<p id="dialog-error" class="alert" role="alert" hidden></p>'+contents;
+      if (!dialog.open) dialog.showModal();
+      else dialog.querySelector('input,button')?.focus();
+    }
+    dialog.addEventListener('close',()=> (state.opener?.isConnected ? state.opener : main).focus({preventScroll:true}));
+
+    function fail(error) {
+      if (error.code === 'AUTH' && state.token) {
+        if (dialog.open) dialog.close();
+        signInView(error.message);
+        return;
+      }
+      const target = dialog.open ? $('#dialog-error') : $('#login-error');
+      if (target) { target.textContent = error.message; target.hidden = false; }
+      else notice(error.message);
+    }
+
+    function asset(kind,id='') {
+      const key = kind+':'+id;
+      if (!state.assets.has(key)) {
+        const fetch = rpc('asset',{kind,id}).then(url => imageURL.test(url) ? url : '');
+        state.assets.set(key,fetch);
+        fetch.catch(() => { if (state.assets.get(key) === fetch) state.assets.delete(key); });
+      }
+      return state.assets.get(key);
+    }
+
+    function readableText(color) {
+      const values = color.slice(1).match(/../g).map(x => parseInt(x,16)/255)
+        .map(x => x<=.04045 ? x/12.92 : ((x+.055)/1.055)**2.4);
+      return .2126*values[0]+.7152*values[1]+.0722*values[2]>.179 ? '#141414' : '#ffffff';
+    }
+
+    function applyBrand(settings=defaults) {
+      const root = document.documentElement.style;
+      for (const [key,variable] of [['accent','--accent'],['background','--paper'],['ink','--ink']]) {
+        root.setProperty(variable,hex.test(settings[key]) ? settings[key] : defaults[key]);
+      }
+      root.setProperty('--button-text',readableText(hex.test(settings.accent) ? settings.accent : defaults.accent));
+      $('#brand').textContent = settings.storeName;
+      $('#mark').textContent = [...settings.storeName][0]?.toUpperCase() || 'I';
+      $('#logo').hidden = true;
+      $('#mark').hidden = false;
+      root.setProperty('--backdrop','none');
+      if (settings.hasLogo) asset('logo').then(url => {
+        if (url && state.data?.brand === settings) { $('#logo').src=url; $('#logo').hidden=false; $('#mark').hidden=true; }
+      }).catch(()=>{});
+      if (settings.hasBackdrop) asset('backdrop').then(url => {
+        if (url && state.data?.brand === settings) root.setProperty('--backdrop','url("'+url+'")');
+      }).catch(()=>{});
+    }
+
+    function signInView(message='') {
+      session(null);
+      state.data = null;
+      state.cart.clear();
+      state.orderKey = null;
+      state.assets.clear();
+      applyBrand();
+      $('#header-actions').innerHTML='';
+      main.innerHTML='<section class="surface signin stack"><h1>Owner sign-in</h1>'+
+        '<p class="muted">Enter the access key for your brand workspace.</p><p id="login-error" class="alert" role="alert" hidden></p>'+
+        '<form class="stack" data-form="signIn"><label>Owner access key<input name="key" type="password" required autocomplete="off"></label>'+
+        '<button class="btn">Sign in</button></form></section>';
+      if (message) fail(new Error(message));
+    }
+
+    function accept(result) {
+      state.data = result;
+      applyBrand(result.brand);
+      render();
+    }
+
+    function renderHeader() {
+      const count = [...state.cart.values()].reduce((sum,line)=>sum+line.quantity,0);
+      $('#header-actions').innerHTML = button('Cart ('+count+')','cart','','')+button('Sign out','signOut');
+    }
+
+    function render() {
+      renderHeader();
+      const {packages,parts} = state.data;
+      const ready = packages.filter(kit=>kit.available>0).length;
+      const metrics = [['Available packages',ready],['Unavailable packages',packages.length-ready],
+        ['Low-stock parts',parts.filter(part=>part.stock<=part.threshold).length]];
+      main.innerHTML='<section><div class="intro"><h1>Inventory dashboard</h1><p class="muted">Manage package recipes, stock, and owner-logged orders.</p></div>'+
+        '<div class="metrics">'+metrics.map(([name,count])=>'<div class="metric"><span>'+name+'</span><strong>'+count+'</strong></div>').join('')+
+        '</div><nav class="tabs" aria-label="Workspace">'+[['packages','Packages'],['parts','Inventory parts'],['brand','Branding']].map(([id,label])=>
+          '<button type="button" class="btn secondary" data-action="tab" data-id="'+id+'" aria-pressed="'+(state.tab===id)+'">'+label+'</button>').join('')+
+        '</nav><div id="panel"></div></section>';
+      if (state.tab==='parts') return renderParts(parts);
+      if (state.tab==='brand') return renderBrand(state.data.brand);
+      renderPackages(packages);
+    }
+
+    function renderPackages(packages) {
+      $('#panel').innerHTML='<div class="row section-head"><h2>Product packages</h2>'+button('New package','editPackage','','')+'</div>'+
+        (packages.length ? '<div class="tiles">'+packages.map(kit=> {
+          const grey=kit.available===0;
+          return '<article class="tile'+(grey?' off':'')+'" aria-labelledby="title-'+kit.id+'">'+
+            (kit.hasPhoto?'<img class="tile-cover" data-photo="'+kit.id+'" alt="" hidden>':'')+
+            '<div class="tile-body"><div class="row"><span class="badge'+(grey?' off':'')+'">'+(grey?'Unavailable':'Available')+
+            '</span><span class="price">'+money(kit.price)+'</span></div><h3 id="title-'+kit.id+'">'+safe(kit.name)+'</h3>'+
+            (kit.description?'<p class="muted small">'+safe(kit.description)+'</p>':'')+
+            (grey?'<ul class="shortages">'+kit.missing.map(part=>'<li>'+safe(part.name)+' · '+part.stock+' on hand, '+part.quantity+' needed</li>').join('')+'</ul>'
+              :'<p class="muted small">'+kit.available+' can be assembled</p>')+'</div><div class="actions tile-actions">'+
+            button('Edit package','editPackage',kit.id)+button('Add to Cart','add',kit.id,'',grey)+'</div></article>';
+        }).join('')+'</div>':'<p class="surface empty">Add inventory parts, then create your first package.</p>');
+      for (const image of document.querySelectorAll('[data-photo]')) asset('package',image.dataset.photo).then(url=>{
+        if (url && image.isConnected) { image.src=url; image.hidden=false; }
+      }).catch(()=>{});
+    }
+
+    function renderParts(parts) {
+      $('#panel').innerHTML='<div class="row section-head"><h2>Inventory parts</h2>'+button('Add part','editPart','','')+'</div>'+
+        (parts.length?'<div class="surface scroll"><table><thead><tr><th scope="col">SKU</th><th scope="col">Part</th><th scope="col">On hand</th>'+
+        '<th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>'+parts.map(part=>
+          '<tr><td>'+safe(part.sku)+'</td><td>'+safe(part.name)+'</td><td>'+part.stock+'</td><td><span class="badge'+
+          (part.stock<=part.threshold?' off':'')+'">'+(part.stock===0?'Out of stock':part.stock<=part.threshold?'Low stock':'In stock')+
+          '</span></td><td>'+button('Edit','editPart',part.id)+'</td></tr>').join('')+
+        '</tbody></table></div>':'<p class="surface empty">Add your first inventory part to track stock.</p>');
+    }
+
+    const imageInput = name => '<input type="file" name="'+name+'" accept="image/jpeg,image/png,image/webp">';
+    function renderBrand(brand) {
+      const color = (label,key) => '<label>'+label+'<input name="'+key+'" type="color" value="'+safe(brand[key])+'"></label>';
+      $('#panel').innerHTML='<div class="row section-head"><h2>Branding settings</h2></div><form class="surface empty stack" data-form="saveBrand">'+
+        '<label>Store name<input name="storeName" value="'+safe(brand.storeName)+'" maxlength="80" required></label><div class="pair">'+
+        color('Theme color','accent')+color('Page background color','background')+'</div>'+color('Page text color','ink')+
+        '<div class="pair"><label>Store logo'+imageInput('logo')+'</label><label>Page background image'+imageInput('backdrop')+'</label></div>'+
+        (brand.hasLogo?'<label class="check"><input type="checkbox" name="removelogo">Remove current logo</label>':'')+
+        (brand.hasBackdrop?'<label class="check"><input type="checkbox" name="removebackdrop">Remove current background image</label>':'')+
+        '<p class="muted small">JPEG, PNG, or WebP attachments up to 1 MB each.</p><div><button class="btn">Save branding</button></div></form>';
+    }
+
+    function editPart(id) {
+      const part=state.data.parts.find(item=>item.id===id);
+      show(part?'Edit part':'Add part','<form data-form="savePart" class="stack" data-id="'+safe(id)+'" data-revision="'+(part?.revision||'')+'">'+
+        '<label>Part name<input name="name" maxlength="100" value="'+safe(part?.name)+'" required></label>'+
+        '<label>SKU<input name="sku" maxlength="40" value="'+safe(part?.sku)+'" required></label><div class="pair">'+
+        '<label>On hand<input name="stock" type="number" min="0" max="1000000" value="'+(part?.stock??0)+'" required></label>'+
+        '<label>Low-stock threshold<input name="threshold" type="number" min="0" max="1000000" value="'+(part?.threshold??5)+'" required></label>'+
+        '</div><button class="btn">Save part</button></form>');
+    }
+
+    function componentRow(component={}) {
+      return '<div class="recipe"><label>Part<select name="part" required><option value="">Choose a part</option>'+
+        state.data.parts.map(part=>'<option value="'+part.id+'"'+(part.id===component.id?' selected':'')+'>'+
+        safe(part.sku+' · '+part.name)+'</option>').join('')+'</select></label><label>Quantity<input name="quantity" type="number" min="1" max="999" value="'+
+        (component.quantity||1)+'" required></label><button type="button" class="btn secondary icon" data-action="removeComponent" aria-label="Remove component">×</button></div>';
+    }
+
+    function editPackage(id) {
+      if (!state.data.parts.length) return notice('Add an inventory part before creating a package.');
+      const kit=state.data.packages.find(item=>item.id===id);
+      show(kit?'Edit package':'New package','<form data-form="savePackage" class="stack" data-id="'+safe(id)+'" data-revision="'+(kit?.revision||'')+'">'+
+        '<label>Package name<input name="name" maxlength="120" value="'+safe(kit?.name)+'" required></label>'+
+        '<label>Description<textarea name="description" maxlength="450" rows="2">'+safe(kit?.description)+'</textarea></label>'+
+        '<div class="pair"><label>Price in PHP (₱)<input name="price" type="number" min="0" max="10000000" step=".01" value="'+
+        (kit?(kit.price/100).toFixed(2):'')+'" required></label><label>Package photo'+imageInput('photo')+'</label></div>'+
+        (kit?.hasPhoto?'<label class="check"><input type="checkbox" name="removePhoto">Remove current photo</label>':'')+
+        '<strong>Package recipe</strong><div id="recipe" class="stack">'+(kit?.components||[{}]).map(componentRow).join('')+'</div>'+
+        '<div>'+button('Add component','addComponent')+'</div><button class="btn">Save package</button></form>');
+    }
+
+    function cartSummary() {
+      const packages=new Map(state.data.packages.map(kit=>[kit.id,kit]));
+      const parts=new Map();
+      let total=0;
+      const lines=[...state.cart].map(([id,line])=>{
+        const kit=packages.get(id);
+        if (kit) {
+          total+=kit.price*line.quantity;
+          for (const part of kit.components) {
+            const previous=parts.get(part.id);
+            parts.set(part.id,{name:part.name,stock:part.stock,quantity:(previous?.quantity||0)+part.quantity*line.quantity});
+          }
+        }
+        return {id,kit,quantity:line.quantity};
+      });
+      return {lines,total,shortages:[...parts.values()].filter(part=>part.stock<part.quantity)};
+    }
+
+    function orderWarning(summary) {
+      if (summary.lines.some(line=>!line.kit)) return 'Remove unavailable packages before submitting.';
+      return summary.shortages.length ? summary.shortages.map(part=>part.name+' needs '+part.quantity+' units. '+part.stock+' on hand.').join(' ') : '';
+    }
+
+    function showCart() {
+      const summary=cartSummary();
+      const warning=orderWarning(summary);
+      if (!summary.lines.length) return show('Cart','<p>Your cart is empty.</p>');
+      show('Cart','<div class="stack">'+summary.lines.map(line=>
+        '<div class="cart-line"><div><strong>'+safe(line.kit?.name||'Unavailable package')+'</strong><p class="muted small">'+
+        (line.kit?money(line.kit.price)+' per package':'Remove this package')+'</p></div><label>Qty<input aria-label="Quantity for '+
+        safe(line.kit?.name||'unavailable package')+'" data-quantity="'+line.id+'" type="number" min="1" max="99" value="'+line.quantity+'" required></label>'+
+        '<button type="button" class="btn secondary icon" data-action="remove" data-id="'+line.id+'" aria-label="Remove package">×</button></div>').join('')+
+        '<div class="row"><strong>Order total</strong><strong id="cart-total">'+money(summary.total)+'</strong></div>'+
+        '<p id="cart-warning" class="alert" '+(warning?'':'hidden')+'>'+safe(warning)+'</p>'+
+        button('Submit Order','order','','',Boolean(warning))+'</div>');
+    }
+
+    function showOrder() {
+      const summary=cartSummary();
+      if (!summary.lines.length || orderWarning(summary)) return showCart();
+      show('Customer details','<form data-form="submitOrder" class="stack"><div class="row"><strong>Order total</strong><strong>'+
+        money(summary.total)+'</strong></div><label>Customer name<input name="customer" maxlength="120" required></label>'+
+        '<div class="pair"><label>Email<input name="email" type="email" maxlength="254"></label>'+
+        '<label>Phone<input name="phone" type="tel" maxlength="60"></label></div><p class="muted small">Enter an email or phone number.</p>'+
+        '<label>Address<textarea name="address" rows="2" maxlength="600"></textarea></label><label>Order notes<textarea name="notes" rows="2" maxlength="500"></textarea></label>'+
+        '<button class="btn">Log order and deduct stock</button></form>');
+    }
+
+    async function image(file) {
+      if (!file?.size) return null;
+      if (!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>1048576) {
+        throw new Error('Choose a JPEG, PNG, or WebP image up to 1 MB.');
+      }
+      const data=await new Promise((resolve,reject)=>{
+        const reader=new FileReader();
+        reader.onload=()=>resolve(reader.result);
+        reader.onerror=()=>reject(new Error('Could not read the selected image.'));
+        reader.readAsDataURL(file);
+      });
+      return {type:file.type,base64:data.slice(data.indexOf(',')+1)};
+    }
+
+    document.addEventListener('input',event=>{
+      const field=event.target;
+      const id=field.dataset.quantity;
+      if (!id) return;
+      if (field.checkValidity() && state.cart.get(id).quantity!==field.valueAsNumber) {
+        state.cart.get(id).quantity=field.valueAsNumber;
+        state.orderKey=null;
+        renderHeader();
+      }
+      const summary=cartSummary();
+      const invalid=[...dialog.querySelectorAll('[data-quantity]')].some(input=>!input.checkValidity());
+      const warning=invalid?'Enter quantities from 1 to 99.':orderWarning(summary);
+      $('#cart-total').textContent=money(summary.total);
+      $('#cart-warning').textContent=warning;
+      $('#cart-warning').hidden=!warning;
+      dialog.querySelector('[data-action=order]').disabled=Boolean(warning);
+    });
+
+    document.addEventListener('click',async event=>{
+      const control=event.target.closest('[data-action]');
+      if (!control) return;
+      const {action,id}=control.dataset;
+      try {
+        switch(action) {
+          case 'close': dialog.close(); break;
+          case 'tab': state.tab=id; render(); $('[data-action=tab][data-id="'+id+'"]').focus(); break;
+          case 'editPart': editPart(id); break;
+          case 'editPackage': editPackage(id); break;
+          case 'addComponent':
+            if ($('#recipe').children.length<40) {
+              $('#recipe').insertAdjacentHTML('beforeend',componentRow());
+              $('#recipe').lastElementChild.querySelector('select').focus();
+            }
+            break;
+          case 'removeComponent':
+            if ($('#recipe').children.length>1) control.closest('.recipe').remove();
+            break;
+          case 'add': {
+            const kit=state.data.packages.find(item=>item.id===id);
+            const quantity=(state.cart.get(id)?.quantity||0)+1;
+            if (quantity>Math.min(99,kit.available)) return notice('There is not enough stock for another package.');
+            state.cart.set(id,{quantity}); state.orderKey=null; renderHeader(); notice('Added to cart.'); break;
+          }
+          case 'cart': showCart(); break;
+          case 'remove': state.cart.delete(id); state.orderKey=null; renderHeader(); showCart(); break;
+          case 'order': showOrder(); break;
+          case 'signOut': await rpc('signOut'); signInView(); break;
+        }
+      } catch(error) { fail(error); }
+    });
+
+    document.addEventListener('submit',async event=>{
+      const form=event.target;
+      const name=form.dataset.form;
+      if (!name) return;
+      event.preventDefault();
+      const submit=event.submitter||form.querySelector('button:not([type])');
+      if (submit.disabled) return;
+      submit.disabled=true;
+      const data=Object.fromEntries(new FormData(form));
+      try {
+        if (name==='signIn') {
+          const result=await rpc(name,data);
+          session(result.token); state.tab='packages'; accept(result);
+          return;
+        }
+        if (name==='submitOrder') {
+          const summary=cartSummary();
+          if (!summary.lines.length||orderWarning(summary)) throw new Error('Review quantities in your cart first.');
+          state.orderKey ||= crypto.randomUUID();
+          const result=await rpc(name,{...data,key:state.orderKey,lines:summary.lines.map(({kit,id,quantity})=>({id,quantity,revision:kit.revision}))});
+          state.cart.clear(); state.orderKey=null; accept(result.dashboard);
+          show('Order logged','<div class="stack"><p>Order <strong>'+safe(result.id.slice(0,8).toUpperCase())+
+            '</strong> was saved and component stock was deducted.</p><strong>'+money(result.total)+'</strong>'+button('Done','close')+'</div>');
+          return;
+        }
+        if (form.dataset.id) { data.id=form.dataset.id; data.revision=Number(form.dataset.revision); }
+        if (name==='savePart') { data.stock=Number(data.stock); data.threshold=Number(data.threshold); }
+        if (name==='savePackage') {
+          data.price=Math.round(Number(data.price)*100);
+          data.components=[...form.querySelectorAll('.recipe')].map(row=>({id:row.querySelector('select').value,quantity:row.querySelector('input').valueAsNumber}));
+          delete data.part; delete data.quantity;
+          data.photo=await image(data.photo);
+          data.removePhoto=Boolean(data.removePhoto)&&!data.photo;
+        }
+        if (name==='saveBrand') { [data.logo,data.backdrop]=await Promise.all([image(data.logo),image(data.backdrop)]); }
+        const result=await rpc(name,data);
+        if (name!=='savePart') state.assets.clear();
+        if (dialog.open) dialog.close();
+        accept(result);
+        notice(name==='saveBrand'?'Branding saved.':name==='savePart'?'Part saved.':'Package saved.');
+      } catch(error) {
+        if (error.code==='STALE' && name==='submitOrder') {
+          try { accept(await rpc('dashboard')); showCart(); } catch {}
+        }
+        fail(error);
+      } finally { submit.disabled=false; }
+    });
+
+    (async()=>{
+      try {
+        let saved;
+        try { saved=sessionStorage.getItem('inventory-session'); } catch {}
+        let result;
+        try { result=await rpc('start',null,saved||null); }
+        catch(error) { if (error.code!=='AUTH') throw error; result=await rpc('start',null,null); }
+        if (result) { session(result.token); accept(result); }
+        else signInView();
+      } catch(error) { signInView(error.message); }
+    })();
+  </script>
+</body>
+</html>
