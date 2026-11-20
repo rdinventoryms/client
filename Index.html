@@ -12,7 +12,7 @@
     h1{font-size:clamp(2.5rem,5vw,4.1rem)} h2{font-size:2rem} h3{font-size:1.56rem;overflow-wrap:anywhere}
     button,input,select,textarea{font:inherit} button{cursor:pointer} button:disabled{opacity:.55;cursor:default}
     :focus-visible{outline:2px solid #765331;outline-offset:3px} .wrap{width:min(1250px,calc(100% - 52px));margin-inline:auto}
-    header{background:var(--surface);color:#2d241e;border-bottom:1px solid var(--line)} .bar{min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding-block:10px}
+    header{position:sticky;top:0;z-index:100;background:var(--surface);color:#2d241e;border-bottom:1px solid var(--line)} .bar{min-height:72px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding-block:10px}
     .brand{display:flex;align-items:center;gap:10px;min-width:0}.brand strong{font:600 1.55rem/1.05 Georgia,serif;overflow-wrap:anywhere}
     #logo,.mark{width:39px;height:39px;border-radius:10px;flex-shrink:0}.mark{display:grid;place-items:center;background:var(--accent);color:var(--button-text);font:600 1.25rem Georgia,serif} #logo{object-fit:contain}
     .actions,.tabs,.row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.row{justify-content:space-between}
@@ -27,6 +27,9 @@
     .tile-cover{width:100%;height:151px;object-fit:cover;display:block;background:#e5dbcc}.tile-cover[hidden]{display:none}.tile-body{padding:17px;display:grid;gap:8px;align-content:start;flex:1}.tile-actions{padding:0 17px 17px}
     .tile-costs{margin:2px 0;display:grid;gap:5px;font-size:.875rem}.tile-costs div{display:flex;justify-content:space-between;flex-wrap:wrap;gap:0 8px}.tile-costs dd{margin:0;font-weight:700;font-variant-numeric:tabular-nums}
     .finance-metrics .metric strong{font-size:clamp(1.125rem,3vw,1.65rem);overflow-wrap:anywhere}
+    .order-summary{margin:0 0 18px;padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:10px}
+    .order-summary div{display:flex;align-items:center;justify-content:space-between;gap:8px}.order-summary dd{margin:0;font-weight:750;font-variant-numeric:tabular-nums}
+    .part-usage{max-width:340px;white-space:normal}.part-usage .badge{overflow-wrap:anywhere}
     .off{background:#eeece8;border-color:#cbc6bd}.off .tile-cover{filter:grayscale(1)}.badge{display:inline-flex;width:fit-content;border-radius:40px;padding:3px 9px;background:#e6efe3;color:#305537;font-weight:650;font-size:.83rem}.badge.off{background:#ddd9d2;color:#4c4842}
     .shortages{margin:0;padding-left:20px;font-size:.875rem}.surface{background:var(--surface);color:#2d241e;border:1px solid var(--line);border-radius:12px}.empty{padding:22px}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left;white-space:nowrap}
     th,td{border-bottom:1px solid var(--line);padding:10px 15px}th{background:#f2eadf;font-size:.875rem}tbody tr:last-child td{border:0}
@@ -37,6 +40,9 @@
     .assembly-image{display:block;width:100%;height:min(45dvh,320px);object-fit:contain;border-radius:10px;background:#f2eadf}
     .assembly-parts{white-space:normal}.assembly-parts th:last-child,.assembly-parts td:last-child{text-align:right}
     .assembly-parts td:first-child{overflow-wrap:anywhere}
+    .tile .shortages,.assembly-parts .insufficient{color:#962c28}
+    .assembly-parts .insufficient{background:#fceae6}
+    .costing-note{border-top:1px solid var(--line);padding-top:10px}
     label{display:grid;gap:5px;font-size:.9rem;font-weight:650} input,select,textarea{background:#fff;border:1px solid #a69a8b;border-radius:7px;min-height:42px;padding:7px 10px;color:#29211b;min-width:0;width:100%}textarea{resize:vertical}input[type=color]{padding:3px} .check{display:flex;gap:7px;align-items:center}.check input{width:17px;min-height:0}
     .recipe{display:grid;grid-template-columns:minmax(0,1fr) 82px 37px;gap:8px;align-items:end}.cart-line{display:grid;grid-template-columns:minmax(0,1fr) 72px 38px;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px} .cart-line strong{overflow-wrap:anywhere}
     .purchase-fields{background:#f7f1e8;border:1px solid var(--line);border-radius:9px;padding:12px}
@@ -75,6 +81,7 @@
     const imageURL = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
     const defaults = {storeName:'Inventory',accent:'#785032',background:'#faf6ed',ink:'#2d241e'};
     const orderStatuses = ['Order Placed','Assembling','Delivery','Fulfilled'];
+    const consumableCostNote = '<p class="muted small costing-note">Note: Consumable items are excluded from the material cost calculation. Adjust your selling price accordingly to cover overhead supplies.</p>';
     const state = {data:null,system:null,token:null,tab:'packages',orders:null,cart:new Map(),orderKey:null,assets:new Map(),opener:null};
     const button = (label,action,id='',kind='secondary',disabled=false) =>
       '<button type="button" class="btn '+kind+'" data-action="'+action+'" data-id="'+safe(id)+'"'+(disabled?' disabled':'')+'>'+label+'</button>';
@@ -239,7 +246,8 @@
         ['Low-stock parts',parts.filter(part=>part.stock<=part.threshold).length]];
       main.innerHTML='<section><div class="intro"><h1>Inventory dashboard</h1><p class="muted">Manage package recipes, stock, and owner-logged orders.</p></div>'+
         '<div class="metrics">'+metrics.map(([name,count])=>'<div class="metric"><span>'+name+'</span><strong>'+count+'</strong></div>').join('')+
-        '</div><nav class="tabs" aria-label="Workspace">'+[['packages','Packages'],['parts','Inventory parts'],['orders','Orders'],['finance','Financial Report'],['brand','Branding']].map(([id,label])=>
+        '</div><dl class="surface order-summary" id="order-summary" aria-label="Order status overview" aria-live="polite">'+orderSummary(state.data.orderStatusCounts)+
+        '</dl><nav class="tabs" aria-label="Workspace">'+[['packages','Packages'],['parts','Inventory parts'],['orders','Orders'],['finance','Financial Report'],['brand','Branding']].map(([id,label])=>
           '<button type="button" class="btn secondary" data-action="tab" data-id="'+id+'" aria-pressed="'+(state.tab===id)+'">'+label+'</button>').join('')+
         '</nav><div id="panel"></div></section>';
       if (state.tab==='parts') return renderParts(parts);
@@ -247,6 +255,22 @@
       if (state.tab==='finance') return renderFinance();
       if (state.tab==='brand') return renderBrand(state.data.brand);
       renderPackages(packages);
+    }
+
+    function orderSummary(counts) {
+      return orderStatuses.map(status=>'<div><dt class="small">'+status+'</dt><dd>'+(counts?.[status] ?? 0)+'</dd></div>').join('');
+    }
+
+    async function refreshOrderSummary() {
+      const data = state.data;
+      if (!data || !state.token || document.hidden) return;
+      const counts = await rpc('orderStatusCounts').catch(()=>null);
+      if (!counts || state.data!==data) return;
+      const summary = $('#order-summary');
+      if (!summary) return;
+      data.orderStatusCounts = counts;
+      const markup = orderSummary(counts);
+      if (summary.innerHTML!==markup) summary.innerHTML=markup;
     }
 
     function renderPackages(packages) {
@@ -282,7 +306,7 @@
       }));
       const buildable = remaining.length
         ? Math.min(...remaining.map(part=>Math.floor(part.remaining / part.quantity))) : 0;
-      return { buildable, missing: remaining.filter(part=>part.remaining < part.quantity) };
+      return { buildable, remaining, missing: remaining.filter(part=>part.remaining < part.quantity) };
     }
 
     function updateCartAvailability(summary) {
@@ -308,13 +332,22 @@
     }
 
     function renderParts(parts) {
-      $('#panel').innerHTML='<div class="row section-head"><h2>Inventory parts</h2>'+button('Add part','editPart','','')+'</div>'+
+      const usage = new Map();
+      for (const kit of state.data.packages) {
+        for (const {id} of kit.components) {
+          if (!usage.has(id)) usage.set(id,[]);
+          usage.get(id).push(kit.name);
+        }
+      }
+      $('#panel').innerHTML='<div class="row section-head"><h2>Inventory parts</h2><div class="actions">'+
+        button('Add part','editPart','','')+button('Add Consumable','addConsumable')+'</div></div>'+
         (parts.length?'<div class="surface scroll"><table><thead><tr><th scope="col">SKU</th><th scope="col">Part</th><th scope="col">On hand</th>'+
-        '<th scope="col">Supplier</th><th scope="col">Average unit cost</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>'+parts.map(part=>
-          '<tr><td>'+safe(part.sku)+'</td><td>'+safe(part.name)+'</td><td>'+part.stock+'</td><td>'+safe(part.supplier || '—')+
+        '<th scope="col">Supplier</th><th scope="col">Average unit cost</th><th scope="col">Status</th><th scope="col">Used in</th><th scope="col">Action</th></tr></thead><tbody>'+parts.map(part=>
+          '<tr><td>'+safe(part.sku)+'</td><td>'+safe(part.name)+(part.consumable?' <span class="badge off">Consumable</span>':'')+'</td><td>'+part.stock+'</td><td>'+safe(part.supplier || '—')+
           '</td><td>'+(part.stock && part.averageCost == null?'Uncosted':unitMoney(part.averageCost))+'</td><td><span class="badge'+
           (part.stock<=part.threshold?' off':'')+'">'+(part.stock===0?'Out of stock':part.stock<=part.threshold?'Low stock':'In stock')+
-          '</span></td><td><div class="actions">'+button('Edit Part','editPart',part.id)+button('Price history','purchaseHistory',part.id)+
+          '</span></td><td class="part-usage"><div class="actions">'+(usage.get(part.id)?.map(name=>'<span class="badge">'+safe(name)+'</span>').join('')||'—')+
+          '</div></td><td><div class="actions">'+button('Edit Part','editPart',part.id)+button('Price history','purchaseHistory',part.id)+
           button('Delete','deletePart',part.id)+'</div></td></tr>').join('')+
         '</tbody></table></div>':'<p class="surface empty">Add your first inventory part to track stock.</p>');
     }
@@ -349,7 +382,7 @@
     async function renderFinance() {
       const panel = $('#panel');
       const token = state.token;
-      const head = '<div class="row section-head"><h2>Financial Report</h2>'+button('Log supply expense','addExpense','','')+'</div>';
+      const head = '<div class="row section-head"><h2>Financial Report</h2></div>';
       panel.innerHTML = head+'<p role="status">Loading financial report…</p>';
       try {
         const report = await rpc('financialReport');
@@ -376,16 +409,6 @@
       }
     }
 
-    function addExpense() {
-      show('Log supply expense','<form class="stack" data-form="saveExpense">'+
-        '<p class="muted small">Record the total paid for a shared supply such as glue or tape.</p>'+
-        '<label>Supply name<input name="name" maxlength="100" required></label>'+
-        '<label>Supplier name<input name="supplier" maxlength="120"></label>'+
-        '<label>Total paid (₱)<input name="amount" type="number" min=".01" max="10000000" step=".01" required></label>'+
-        '<label>Notes<textarea name="notes" maxlength="450" rows="2"></textarea></label>'+
-        '<div class="actions">'+button('Cancel','close')+'<button class="btn">Save expense</button></div></form>');
-    }
-
     const orderRef = id => '#'+id.slice(0,8).toUpperCase();
 
     function orderDetailsFields(order={}) {
@@ -394,8 +417,9 @@
         '<label>Phone<input name="phone" type="tel" maxlength="60" value="'+safe(order.phone)+'"></label></div><p class="muted small">Enter an email or phone number.</p>'+
         '<label>Address<textarea name="address" rows="2" maxlength="600">'+safe(order.address)+'</textarea></label>'+
         '<label>Order notes<textarea name="notes" rows="2" maxlength="500">'+safe(order.notes)+'</textarea></label>'+
-        '<label>Order status<select name="status">'+orderStatuses.map(status=>'<option'+
-          (order.status===status?' selected':'')+'>'+status+'</option>').join('')+'</select></label>';
+        (order.id?'<label>Order status<select name="status">'+orderStatuses.map(status=>'<option'+
+          (order.status===status?' selected':'')+'>'+status+'</option>').join('')+'</select></label>'
+          :'<p class="muted small">New order status is <strong>Order Placed</strong>.</p>');
     }
 
     function orderLine(line={}) {
@@ -479,15 +503,17 @@
         (required?' required':'')+'></label>';
     }
 
-    function addPart() {
-      show('Add part',partForm('savePart')+
+    function addPart(consumable = false) {
+      show(consumable?'Add Consumable':'Add part',partForm('savePart')+
+        (consumable?'<input type="hidden" name="consumable" value="yes">'+
+          '<p class="muted small">New packages use one stock unit of this consumable per kit. Choose an inventory unit that matches what one kit uses.</p>':'')+
         '<label>Part Name<input name="name" maxlength="100" required></label>'+
         '<div class="pair">'+disabledPartField('SKU','sku','Generated on save')+
         '<label>Supplier Name<input name="supplier" maxlength="120"></label></div><div class="pair">'+
         '<label><span data-stock-label>On Hand</span><input name="stock" type="number" min="0" max="1000000" value="0" required></label>'+
         '<label>Low Stock Threshold<input name="threshold" type="number" min="0" max="1000000" value="5" required></label></div>'+
         openingCostField()+'<p class="muted small">Enter the cost of any units already on hand.</p>'+
-        '<button class="btn">Save part</button></form>');
+        '<button class="btn">'+(consumable?'Save consumable':'Save part')+'</button></form>');
     }
 
     function editPart(id) {
@@ -569,7 +595,7 @@
     }
 
     function componentOptions(selected = '', excluded = new Set()) {
-      return '<option value="">Choose a part</option>'+state.data.parts.filter(part=>!excluded.has(part.id))
+      return '<option value="">Choose a part</option>'+state.data.parts.filter(part=>!part.consumable && !excluded.has(part.id))
         .map(part=>'<option value="'+safe(part.id)+'"'+(part.id===selected?' selected':'')+'>'+
           safe(part.name+' ('+part.sku+')')+'</option>').join('');
     }
@@ -581,7 +607,7 @@
         const excluded = new Set(selected.filter((id,row)=>id && row!==index));
         select.innerHTML = componentOptions(selected[index],excluded);
       });
-      form.querySelector('[data-action="addComponent"]').disabled = selects.length>=Math.min(40,state.data.parts.length);
+      form.querySelector('[data-action="addComponent"]').disabled = selects.length>=Math.min(40,state.data.parts.filter(part=>!part.consumable).length);
     }
 
     function componentRow(component={}) {
@@ -610,13 +636,16 @@
       const kit = state.data.packages.find(item=>item.id===id);
       if (!kit) return;
       const parts = new Map(state.data.parts.map(part=>[part.id,part]));
+      const {remaining} = packageAvailability(kit,cartSummary().reserved);
       show('Assembly details','<div class="stack"><h3>'+safe(kit.name)+'</h3>'+
         (kit.hasPhoto?'<img class="assembly-image" alt="'+safe(kit.name)+'" hidden><p class="muted small" data-assembly-photo-status role="status">Loading package photo…</p>'
           :'<p class="muted small">No package photo uploaded.</p>')+
         '<div class="surface scroll"><table class="assembly-parts"><thead><tr><th scope="col">Part</th><th scope="col">SKU</th>'+
-        '<th scope="col">Quantity per kit</th></tr></thead><tbody>'+kit.components.map(part=>
-          '<tr><td>'+safe(part.name)+'</td><td>'+safe(parts.get(part.id)?.sku || '—')+'</td><td>'+part.quantity+'</td></tr>').join('')+
-        '</tbody></table></div>'+button('Done','close')+'</div>');
+        '<th scope="col">Quantity per kit</th><th scope="col">Available after cart</th></tr></thead><tbody>'+remaining.map(part=>
+          '<tr'+(part.remaining<part.quantity?' class="insufficient"':'')+'><td>'+safe(part.name)+
+          (parts.get(part.id)?.consumable?' <span class="badge off">Consumable</span>':'')+'</td><td>'+safe(parts.get(part.id)?.sku || '—')+
+          '</td><td>'+part.quantity+'</td><td>'+part.remaining+(part.remaining<part.quantity?' · Short by '+(part.quantity-part.remaining):'')+'</td></tr>').join('')+
+        '</tbody></table></div>'+button('Done','close')+consumableCostNote+'</div>');
       if (!kit.hasPhoto) return;
       const photo = dialog.querySelector('.assembly-image');
       const status = dialog.querySelector('[data-assembly-photo-status]');
@@ -627,19 +656,28 @@
     }
 
     function editPackage(id) {
-      if (!state.data.parts.length) return notice('Add an inventory part before creating a package.');
+      const regularParts = state.data.parts.filter(part=>!part.consumable);
+      if (!regularParts.length) return notice('Add a regular inventory part before creating a package.');
       const kit=state.data.packages.find(item=>item.id===id);
+      const consumables = new Map(state.data.parts.filter(part=>part.consumable).map(part=>[part.id,part]));
+      const attached = kit ? kit.components.filter(part=>consumables.has(part.id)) :
+        [...consumables.values()].map(part=>({id:part.id,name:part.name,quantity:1}));
+      const recipe = kit ? kit.components.filter(part=>!consumables.has(part.id)) : [];
       show(kit?'Edit package':'New package','<form data-form="savePackage" class="stack" data-id="'+safe(id)+'" data-revision="'+(kit?.revision||'')+'">'+
         '<label>Package name<input name="name" maxlength="120" value="'+safe(kit?.name)+'" required></label>'+
         '<label>Description<textarea name="description" maxlength="450" rows="2">'+safe(kit?.description)+'</textarea></label>'+
         '<div class="pair"><label>Selling Price (₱)<input name="price" type="number" min="0" max="10000000" step=".01" value="'+
         (kit?(kit.price/100).toFixed(2):'')+'" required></label><label>Package photo'+imageInput('photo')+'</label></div>'+
         (kit?.hasPhoto?'<label class="check"><input type="checkbox" name="removePhoto">Remove current photo</label>':'')+
-        '<strong>Package recipe</strong><div id="recipe" class="stack">'+(kit?.components||[{}]).map(componentRow).join('')+'</div>'+
+        '<strong>Package recipe</strong><div id="recipe" class="stack">'+(recipe.length?recipe:[{}]).map(componentRow).join('')+'</div>'+
         '<div>'+button('Add component','addComponent')+'</div>'+
+        (attached.length?'<div class="stack"><strong>'+(kit?'Attached consumables':'Automatically added consumables')+'</strong>'+
+          (kit?attached.map(part=>'<label class="check"><input type="checkbox" value="'+safe(part.id)+'" data-keep-consumable checked>'+
+            safe(part.name)+' ('+part.quantity+' per kit)</label>').join('')
+            :'<ul class="shortages">'+attached.map(part=>'<li>'+safe(part.name)+' (1 per kit)</li>').join('')+'</ul>')+'</div>':'')+
         '<div class="stack margin-summary" aria-live="polite"><div class="row"><strong>Total Material Cost</strong><output data-material-cost>—</output></div>'+
         '<div class="row"><strong>Profit</strong><output data-profit>—</output></div><p data-cost-message class="muted small" hidden></p></div>'+
-        '<button class="btn">Save package</button></form>');
+        '<button class="btn">Save package</button>'+consumableCostNote+'</form>');
       const form = dialog.querySelector('form');
       refreshComponentSelectors(form);
       packageMargin(form);
@@ -660,6 +698,7 @@
       let complete = components.length>0;
       for (const {id,quantity} of components) {
         const part = parts.get(id);
+        if (part?.consumable) continue;
         if (!part || !Number.isInteger(quantity) || quantity<1) { complete=false; continue; }
         if (part.averageCost == null) unpriced.add(part.name);
         else amount += part.averageCost * quantity;
@@ -819,7 +858,7 @@
           case 'openingCost': setOpeningCost(id); break;
           case 'purchaseHistory': await showPurchaseHistory(id); break;
           case 'editPackage': editPackage(id); break;
-          case 'addExpense': addExpense(); break;
+          case 'addConsumable': addPart(true); break;
           case 'assemblyDetails': await showAssemblyDetails(id); break;
           case 'deletePackage': confirmDeletePackage(id); break;
           case 'editOrder': editOrder(id); break;
@@ -839,7 +878,7 @@
             }
             break;
           case 'addComponent':
-            if ($('#recipe').children.length<Math.min(40,state.data.parts.length)) {
+            if (!control.disabled) {
               const form = control.closest('form');
               $('#recipe').insertAdjacentHTML('beforeend',componentRow());
               refreshComponentSelectors(form);
@@ -905,16 +944,6 @@
           else notice('Access key updated.');
           return;
         }
-        if (name==='saveExpense') {
-          const token = state.token;
-          form.dataset.expenseKey ||= crypto.randomUUID();
-          await rpc(name,{...data,key:form.dataset.expenseKey,amount:Math.round(Number(data.amount)*100)});
-          if (state.token!==token) return;
-          if (form.isConnected && dialog.open) dialog.close();
-          if (state.tab==='finance') render();
-          notice('Supply expense saved.');
-          return;
-        }
         if (name==='submitOrder') {
           const fromCart = form.dataset.source==='cart';
           if (fromCart) {
@@ -942,6 +971,7 @@
           data.stock=Number(data.stock);
           data.threshold=Number(data.threshold);
         }
+        if (name==='savePart') data.consumable=data.consumable==='yes';
         if (name==='savePart' || name==='setPartOpeningCost') {
           data.openingCost=data.openingCost!=='' ? Math.round(Number(data.openingCost)*100) : null;
         }
@@ -954,6 +984,7 @@
         if (name==='savePackage') {
           data.price=Math.round(Number(data.price)*100);
           data.components=[...form.querySelectorAll('.recipe')].map(row=>({id:row.querySelector('select').value,quantity:row.querySelector('input').valueAsNumber}));
+          data.removeConsumables=[...form.querySelectorAll('[data-keep-consumable]:not(:checked)')].map(field=>field.value);
           delete data.part; delete data.quantity;
           data.photo=await image(data.photo);
           data.removePhoto=Boolean(data.removePhoto)&&!data.photo;
@@ -974,7 +1005,7 @@
         }
         if (dialog.open) dialog.close();
         accept(result);
-        const notices = {saveBrand:'Branding saved.',savePart:'Part saved.',editPartInfo:'Part info saved.',deletePart:'Part deleted.',
+        const notices = {saveBrand:'Branding saved.',savePart:data.consumable?'Consumable saved.':'Part saved.',editPartInfo:'Part info saved.',deletePart:'Part deleted.',
           restockPart:'Restock saved.',savePackage:'Package saved.',deletePackage:'Package deleted.',
           updateOrder:'Order updated.',deleteOrder:'Order deleted and stock returned.'};
         notice(notices[name]);
@@ -1001,6 +1032,8 @@
         else signInView();
       } catch(error) { signInView(error.message); }
     })();
+    setInterval(refreshOrderSummary,60000);
+    document.addEventListener('visibilitychange',refreshOrderSummary);
   </script>
 </body>
 </html>
