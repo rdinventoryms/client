@@ -9,6 +9,7 @@ const COLUMNS = {
     'Quantity purchased', 'Total centavos', 'Unit cost centavos', 'Stock before receipt',
     'Value before receipt centavos', 'Stock after receipt', 'Value after receipt centavos',
     'Weighted average centavos', 'Request ID'],
+  Expenses: ['Expense ID', 'Recorded UTC', 'Supply', 'Supplier name', 'Total centavos', 'Notes', 'Request ID'],
 };
 const HEX = /^#[0-9a-f]{6}$/i;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -64,6 +65,8 @@ function action(name, token, data) {
       case 'restockPart': return { ok: true, data: locked_(() => restockPart_(tenant, data)) };
       case 'setPartOpeningCost': return { ok: true, data: locked_(() => setPartOpeningCost_(tenant, data)) };
       case 'purchaseHistory': return { ok: true, data: purchaseHistory_(tenant, data.id) };
+      case 'financialReport': return { ok: true, data: locked_(() => financialReport_(tenant)) };
+      case 'saveExpense': return { ok: true, data: locked_(() => saveExpense_(tenant, data)) };
       case 'savePackage': return { ok: true, data: locked_(() => savePackage_(tenant, data)) };
       case 'deletePackage': return { ok: true, data: locked_(() => deletePackage_(tenant, data)) };
       case 'saveBrand': return { ok: true, data: locked_(() => saveBrand_(tenant, data)) };
@@ -164,7 +167,7 @@ function createTenant_(email, rawBrand) {
   });
   write_(sheet, requests);
   const tenant = { id, email, brand, digest: '', folderId: folder.id, sheetId: file.id, generation: 1,
-    purchaseSchema: 1, orderSchema: 1, packageSchema: 1, partSchema: 1 };
+    purchaseSchema: 1, orderSchema: 1, packageSchema: 1, partSchema: 1, expenseSchema: 1 };
   PropertiesService.getScriptProperties().setProperty('tenant:' + id, JSON.stringify(tenant));
   return tenant;
 }
@@ -346,7 +349,8 @@ function write_(sheet, requests) {
 }
 
 function hasCurrentSchema_(tenant) {
-  return tenant.purchaseSchema === 1 && tenant.orderSchema === 1 && tenant.packageSchema === 1 && tenant.partSchema === 1;
+  return tenant.purchaseSchema === 1 && tenant.orderSchema === 1 && tenant.packageSchema === 1 &&
+    tenant.partSchema === 1 && tenant.expenseSchema === 1;
 }
 
 function ensureWorkspaceSchema_(tenant) {
@@ -356,22 +360,23 @@ function ensureWorkspaceSchema_(tenant) {
     if (hasCurrentSchema_(current)) return;
     const sheet = book_(current.sheetId);
     const requests = [];
-    if (current.purchaseSchema !== 1) {
-      if (!sheet.tabs.some(tab => tab.title === 'Purchases')) {
-        const sheetId = Math.max(...sheet.tabs.map(tab => tab.sheetId)) + 1;
-        requests.push({ addSheet: { properties: { title: 'Purchases', sheetId, gridProperties: { frozenRowCount: 1 } } } },
-          update_(sheetId, 0, 0, [COLUMNS.Purchases]));
-      }
-      requests.push(update_(sheet.tab('Parts'), 0, 6, [COLUMNS.Parts.slice(6, 8)]));
+    let nextSheetId = Math.max(...sheet.tabs.map(tab => tab.sheetId)) + 1;
+    for (const [title, schema] of [['Purchases', current.purchaseSchema], ['Expenses', current.expenseSchema]]) {
+      if (schema === 1 || sheet.tabs.some(tab => tab.title === title)) continue;
+      const sheetId = nextSheetId++;
+      requests.push({ addSheet: { properties: { title, sheetId, gridProperties: { frozenRowCount: 1 } } } },
+        update_(sheetId, 0, 0, [COLUMNS[title]]));
     }
+    if (current.purchaseSchema !== 1) requests.push(update_(sheet.tab('Parts'), 0, 6, [COLUMNS.Parts.slice(6, 8)]));
     if (current.orderSchema !== 1) requests.push(update_(sheet.tab('Orders'), 0, 12, [COLUMNS.Orders.slice(12)]));
     if (current.packageSchema !== 1) requests.push(update_(sheet.tab('Packages'), 0, 7, [COLUMNS.Packages.slice(7)]));
     if (current.partSchema !== 1) requests.push(update_(sheet.tab('Parts'), 0, 8, [COLUMNS.Parts.slice(8)]));
-    write_(sheet, requests);
+    if (requests.length) write_(sheet, requests);
     current.purchaseSchema = 1;
     current.orderSchema = 1;
     current.packageSchema = 1;
     current.partSchema = 1;
+    current.expenseSchema = 1;
     PropertiesService.getScriptProperties().setProperty('tenant:' + current.id, JSON.stringify(current));
   });
 }
@@ -415,6 +420,35 @@ function dashboard_(tenant) {
     parts: parts.map(({ index, deleted, ...part }) => part),
     packages: packages_(sheet).map(kit => packageStatus_(kit, partMap)),
   };
+}
+
+function financialReport_(tenant) {
+  const sheet = book_(tenant.sheetId);
+  const parts = parts_(sheet);
+  const expenses = rows_(sheet, 'Expenses').filter(([id]) => id);
+  const sumAmounts = (rows, index) => rows.reduce((sum, row) =>
+    sum + (Number.isSafeInteger(row[index]) && row[index] >= 0 ? row[index] : 0), 0);
+  const orders = rows_(sheet, 'Orders').filter(row => row[0] && !row[14]);
+  const purchases = rows_(sheet, 'Purchases').filter(([id]) => id);
+  return {
+    inventoryValue: parts.reduce((sum, part) => sum + (part.stockValue ?? 0), 0),
+    uncostedParts: parts.filter(part => part.stock > 0 && part.stockValue === null).length,
+    orderIncome: sumAmounts(orders, 8),
+    restockExpenses: sumAmounts(purchases, 8),
+    supplyExpenses: sumAmounts(expenses, 4),
+    recentSupplies: expenses.slice(-25).reverse().map(([, recorded, name, supplier, amount, notes]) =>
+      ({ recorded, name, supplier, amount, notes })),
+  };
+}
+
+function saveExpense_(tenant, data) {
+  if (!UUID.test(String(data.key))) fail_('Invalid expense reference.');
+  const sheet = book_(tenant.sheetId);
+  if (values_(sheet, 'Expenses!G2:G').some(([key]) => key === data.key)) return;
+  const row = [Utilities.getUuid(), new Date().toISOString(), text_(data.name, 'supply name', 100),
+    text_(data.supplier, 'supplier name', 120, false), integer_(data.amount, 'Expense in centavos', 1000000000, 1),
+    text_(data.notes, 'notes', 450, false), data.key];
+  write_(sheet, [append_(sheet.tab('Expenses'), [row])]);
 }
 
 function prorate_(value, stock, quantity) {

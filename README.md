@@ -47,6 +47,8 @@ The manifest uses the per-file Drive scope, which grants access to files the app
 
 - Add individual components under **Inventory parts**. A new part gets a unique SKU prefixed with the current store name's uppercase initials, using up to three letters. A single-word store uses its first three letters. Enter any opening stock and its unit cost, then use **Restock** for purchases.
 - In **Add/Edit Package**, enter a selling price and choose the components and quantities. The form totals their active weighted-average unit costs and subtracts the material cost from the selling price to show profit. Parts without an active unit cost leave the total and profit undetermined.
+- Package tiles show the selling price, estimated materials cost, and estimated profit using the same recipe calculation. Shared supply expenses are recorded separately from package recipes.
+- Under **Financial Report**, choose **Log supply expense** to record one purchase of a shared supply such as glue or tape. Enter the total paid and optionally add the supplier and notes. The report shows current valued inventory, active order totals, and all-time restock and supply expenses.
 - Each package tile shows how many more kits can be built after reserving components for all current cart items. **View Assembly Details** opens the package photo and lists each required part and its quantity per kit.
 - Use **Delete** on a package tile to remove the package from use. The app archives its row in the brand Sheet for order history and keeps the package details on existing orders.
 - Use **Delete** under **Inventory parts** to archive a part. If it is in an active package recipe, remove it from the listed packages first. The archived row and purchase records stay in the brand Sheet. Stock returned from an existing order for that part goes back to the archived row.
@@ -59,6 +61,6 @@ The manifest uses the per-file Drive scope, which grants access to files the app
 
 ## Storage and stock consistency
 
-Each brand spreadsheet contains Settings, Parts, Packages, Purchases, and Orders. Existing brand spreadsheets receive new columns on their first access after an update. Images live in the same private brand folder. Brand sessions select the spreadsheet server-side.
+Each brand spreadsheet contains Settings, Parts, Packages, Purchases, Orders, and Expenses. Existing brand spreadsheets receive new tabs and columns on their first access after an update. Images live in the same private brand folder. Brand sessions select the spreadsheet server-side.
 
 Submit orders and edit stock through the app so they use the same lock. The app adds the required quantities of parts shared by multiple cart items. It submits the order row and stock deductions together in one Sheets batch. A retry with the same order reference returns the existing order. Editing data directly in Sheets can bypass these checks. Keep the root folder private to avoid granting inherited Drive access across brands.

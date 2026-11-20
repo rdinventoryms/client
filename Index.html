@@ -24,12 +24,16 @@
     .tabs{border-bottom:1px solid color-mix(in srgb,var(--ink) 23%,transparent);padding-bottom:12px;margin-bottom:16px}.tabs .btn[aria-pressed=true]{background:var(--accent);color:var(--button-text)}
     .section-head{margin-block:0 15px}.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
     .tile{border:1px solid var(--line);background:var(--surface);color:#2d241e;border-radius:15px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 7px 22px #24180c0b}
-    .tile-cover{width:100%;height:151px;object-fit:cover;display:block;background:#e5dbcc}.tile-cover[hidden]{display:none}.tile-body{padding:17px;display:grid;gap:8px;align-content:start;flex:1}.tile-actions{padding:0 17px 17px}.price{font-weight:750;font-size:1.05rem}
+    .tile-cover{width:100%;height:151px;object-fit:cover;display:block;background:#e5dbcc}.tile-cover[hidden]{display:none}.tile-body{padding:17px;display:grid;gap:8px;align-content:start;flex:1}.tile-actions{padding:0 17px 17px}
+    .tile-costs{margin:2px 0;display:grid;gap:5px;font-size:.875rem}.tile-costs div{display:flex;justify-content:space-between;flex-wrap:wrap;gap:0 8px}.tile-costs dd{margin:0;font-weight:700;font-variant-numeric:tabular-nums}
+    .finance-metrics .metric strong{font-size:clamp(1.125rem,3vw,1.65rem);overflow-wrap:anywhere}
     .off{background:#eeece8;border-color:#cbc6bd}.off .tile-cover{filter:grayscale(1)}.badge{display:inline-flex;width:fit-content;border-radius:40px;padding:3px 9px;background:#e6efe3;color:#305537;font-weight:650;font-size:.83rem}.badge.off{background:#ddd9d2;color:#4c4842}
     .shortages{margin:0;padding-left:20px;font-size:.875rem}.surface{background:var(--surface);color:#2d241e;border:1px solid var(--line);border-radius:12px}.empty{padding:22px}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;text-align:left;white-space:nowrap}
     th,td{border-bottom:1px solid var(--line);padding:10px 15px}th{background:#f2eadf;font-size:.875rem}tbody tr:last-child td{border:0}
     dialog{width:min(610px,calc(100% - 24px));max-height:calc(100dvh - 24px);margin:auto;padding:22px;border:1px solid var(--line);border-radius:16px;background:var(--surface);color:#2d241e;box-shadow:0 22px 85px #30241b36}
     dialog::backdrop{background:#2c211bb0}.dialog-head{margin-bottom:16px;align-items:start}.stack{display:grid;gap:13px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    body:has(dialog[open]){overflow:hidden}
+    dialog{overflow:auto;overscroll-behavior:contain}
     .assembly-image{display:block;width:100%;height:min(45dvh,320px);object-fit:contain;border-radius:10px;background:#f2eadf}
     .assembly-parts{white-space:normal}.assembly-parts th:last-child,.assembly-parts td:last-child{text-align:right}
     .assembly-parts td:first-child{overflow-wrap:anywhere}
@@ -235,24 +239,25 @@
         ['Low-stock parts',parts.filter(part=>part.stock<=part.threshold).length]];
       main.innerHTML='<section><div class="intro"><h1>Inventory dashboard</h1><p class="muted">Manage package recipes, stock, and owner-logged orders.</p></div>'+
         '<div class="metrics">'+metrics.map(([name,count])=>'<div class="metric"><span>'+name+'</span><strong>'+count+'</strong></div>').join('')+
-        '</div><nav class="tabs" aria-label="Workspace">'+[['packages','Packages'],['parts','Inventory parts'],['orders','Orders'],['brand','Branding']].map(([id,label])=>
+        '</div><nav class="tabs" aria-label="Workspace">'+[['packages','Packages'],['parts','Inventory parts'],['orders','Orders'],['finance','Financial Report'],['brand','Branding']].map(([id,label])=>
           '<button type="button" class="btn secondary" data-action="tab" data-id="'+id+'" aria-pressed="'+(state.tab===id)+'">'+label+'</button>').join('')+
         '</nav><div id="panel"></div></section>';
       if (state.tab==='parts') return renderParts(parts);
       if (state.tab==='orders') return renderOrders();
+      if (state.tab==='finance') return renderFinance();
       if (state.tab==='brand') return renderBrand(state.data.brand);
       renderPackages(packages);
     }
 
     function renderPackages(packages) {
+      const parts = new Map(state.data.parts.map(part=>[part.id,part]));
       $('#panel').innerHTML='<div class="row section-head"><h2>Product packages</h2>'+button('New package','editPackage','','')+'</div>'+
         (packages.length ? '<div class="tiles">'+packages.map(kit=>
           '<article class="tile" data-kit="'+kit.id+'" aria-labelledby="title-'+kit.id+'">'+
             (kit.hasPhoto?'<img class="tile-cover" data-photo="'+kit.id+'" alt="" hidden>':'')+
-            '<div class="tile-body"><div class="row"><span class="badge" data-stock-status></span>'+
-            '<span class="price">'+money(kit.price)+'</span></div><h3 id="title-'+kit.id+'">'+safe(kit.name)+'</h3>'+
+            '<div class="tile-body"><span class="badge" data-stock-status></span><h3 id="title-'+kit.id+'">'+safe(kit.name)+'</h3>'+
             (kit.description?'<p class="muted small">'+safe(kit.description)+'</p>':'')+
-            '<div data-buildable aria-live="polite"></div></div><div class="actions tile-actions">'+
+            packageTileCosts(kit,parts)+'<div data-buildable aria-live="polite"></div></div><div class="actions tile-actions">'+
             button('Edit package','editPackage',kit.id)+button('Add to Cart','add',kit.id,'')+
             button('View Assembly Details','assemblyDetails',kit.id)+button('Delete','deletePackage',kit.id)+'</div></article>'
         ).join('')+'</div>':'<p class="surface empty">Add inventory parts, then create your first package.</p>');
@@ -260,6 +265,15 @@
       for (const image of document.querySelectorAll('[data-photo]')) asset('package',image.dataset.photo).then(url=>{
         if (url && image.isConnected) { image.src=url; image.hidden=false; }
       }).catch(()=>{});
+    }
+
+    function packageTileCosts(kit,parts) {
+      const {material}=estimateMaterials(kit.components,parts);
+      const profit = material === null ? null : kit.price-material;
+      const values = [['Selling Price',kit.price],['Estimated Materials Cost',material],['Estimated Profit',profit]];
+      return '<dl class="tile-costs">'+values.map(([label,value])=>'<div><dt>'+label+'</dt><dd'+
+        (value!==null && value<0?' class="negative"':'')+'>'+(value===null?'—':money(value))+'</dd></div>').join('')+'</dl>'+
+        (material===null?'<p class="muted small">Cost unavailable for one or more components.</p>':'');
     }
 
     function packageAvailability(kit, reserved) {
@@ -330,6 +344,46 @@
           '</td><td><span class="badge '+(badgeClass[order.status]||'')+'">'+safe(order.status)+'</span></td>'+
           '<td><div class="actions">'+button('Edit order','editOrder',order.id)+button('Delete','deleteOrder',order.id)+'</div></td></tr>'
         ).join('')+'</tbody></table></div>' : '<p class="surface empty">No orders have been logged yet.</p>');
+    }
+
+    async function renderFinance() {
+      const panel = $('#panel');
+      const token = state.token;
+      const head = '<div class="row section-head"><h2>Financial Report</h2>'+button('Log supply expense','addExpense','','')+'</div>';
+      panel.innerHTML = head+'<p role="status">Loading financial report…</p>';
+      try {
+        const report = await rpc('financialReport');
+        if (!panel.isConnected || state.token!==token) return;
+        const metrics = [['Inventory assets',report.inventoryValue],['Order income',report.orderIncome],
+          ['Total expenses',report.restockExpenses+report.supplyExpenses],['Part restocks',report.restockExpenses],
+          ['Consumables and overhead',report.supplyExpenses]];
+        const recent = report.recentSupplies;
+        panel.innerHTML = head+'<div class="stack"><p class="muted small">Assets use the recorded cost of current stock. Order income totals active orders regardless of payment status. Expenses are all-time.</p>'+
+          '<div class="metrics finance-metrics">'+metrics.map(([label,amount])=>'<div class="metric"><span>'+label+'</span><strong>'+money(amount)+'</strong></div>').join('')+'</div>'+
+          (report.uncostedParts?'<p class="alert">'+report.uncostedParts+' stocked '+(report.uncostedParts===1?'part has':'parts have')+
+            ' no recorded cost and could not be valued.</p>':'')+
+          '<h3>Recent supply expenses</h3>'+
+          (recent.length?'<div class="surface scroll"><table><thead><tr>'+
+            ['Date recorded','Supply','Supplier','Amount','Notes'].map(label=>'<th scope="col">'+label+'</th>').join('')+
+            '</tr></thead><tbody>'+recent.map(item=>'<tr><td>'+displayDate.format(new Date(item.recorded))+
+            '</td><td>'+safe(item.name)+'</td><td>'+safe(item.supplier||'—')+'</td><td>'+money(item.amount)+
+            '</td><td>'+safe(item.notes||'—')+'</td></tr>').join('')+'</tbody></table></div>'
+            :'<p class="surface empty">No supply expenses have been logged yet.</p>')+'</div>';
+      } catch(error) {
+        if (!panel.isConnected || state.token!==token) return;
+        if (error.code==='AUTH') return fail(error);
+        panel.innerHTML = head+'<p class="alert" role="alert">'+safe(error.message)+'</p>';
+      }
+    }
+
+    function addExpense() {
+      show('Log supply expense','<form class="stack" data-form="saveExpense">'+
+        '<p class="muted small">Record the total paid for a shared supply such as glue or tape.</p>'+
+        '<label>Supply name<input name="name" maxlength="100" required></label>'+
+        '<label>Supplier name<input name="supplier" maxlength="120"></label>'+
+        '<label>Total paid (₱)<input name="amount" type="number" min=".01" max="10000000" step=".01" required></label>'+
+        '<label>Notes<textarea name="notes" maxlength="450" rows="2"></textarea></label>'+
+        '<div class="actions">'+button('Cancel','close')+'<button class="btn">Save expense</button></div></form>');
     }
 
     const orderRef = id => '#'+id.slice(0,8).toUpperCase();
@@ -514,10 +568,25 @@
           : '<p class="muted">No purchases have been logged for this part.</p>')+'</div>');
     }
 
+    function componentOptions(selected = '', excluded = new Set()) {
+      return '<option value="">Choose a part</option>'+state.data.parts.filter(part=>!excluded.has(part.id))
+        .map(part=>'<option value="'+safe(part.id)+'"'+(part.id===selected?' selected':'')+'>'+
+          safe(part.name+' ('+part.sku+')')+'</option>').join('');
+    }
+
+    function refreshComponentSelectors(form) {
+      const selects = [...form.querySelectorAll('select[name="part"]')];
+      const selected = selects.map(select=>select.value);
+      selects.forEach((select,index)=>{
+        const excluded = new Set(selected.filter((id,row)=>id && row!==index));
+        select.innerHTML = componentOptions(selected[index],excluded);
+      });
+      form.querySelector('[data-action="addComponent"]').disabled = selects.length>=Math.min(40,state.data.parts.length);
+    }
+
     function componentRow(component={}) {
-      return '<div class="recipe"><label>Part<select name="part" required><option value="">Choose a part</option>'+
-        state.data.parts.map(part=>'<option value="'+part.id+'"'+(part.id===component.id?' selected':'')+'>'+
-        safe(part.sku+' · '+part.name)+'</option>').join('')+'</select></label><label>Quantity<input name="quantity" type="number" min="1" max="999" value="'+
+      return '<div class="recipe"><label>Part<select name="part" required>'+componentOptions(component.id)+
+        '</select></label><label>Quantity<input name="quantity" type="number" min="1" max="999" value="'+
         (component.quantity||1)+'" required></label><button type="button" class="btn secondary icon" data-action="removeComponent" aria-label="Remove component">×</button></div>';
     }
 
@@ -571,7 +640,9 @@
         '<div class="stack margin-summary" aria-live="polite"><div class="row"><strong>Total Material Cost</strong><output data-material-cost>—</output></div>'+
         '<div class="row"><strong>Profit</strong><output data-profit>—</output></div><p data-cost-message class="muted small" hidden></p></div>'+
         '<button class="btn">Save package</button></form>');
-      packageMargin(dialog.querySelector('form'));
+      const form = dialog.querySelector('form');
+      refreshComponentSelectors(form);
+      packageMargin(form);
     }
 
     function confirmDeletePackage(id) {
@@ -583,21 +654,26 @@
         '<div class="actions">'+button('Cancel','close')+'<button class="btn danger">Delete package</button></div></form>');
     }
 
+    function estimateMaterials(components,parts) {
+      const unpriced = new Set();
+      let amount = 0;
+      let complete = components.length>0;
+      for (const {id,quantity} of components) {
+        const part = parts.get(id);
+        if (!part || !Number.isInteger(quantity) || quantity<1) { complete=false; continue; }
+        if (part.averageCost == null) unpriced.add(part.name);
+        else amount += part.averageCost * quantity;
+      }
+      return {material:complete && !unpriced.size ? Math.round(amount) : null,unpriced};
+    }
+
     function packageMargin(form) {
       const parts = new Map(state.data.parts.map(part=>[part.id,part]));
-      const missing = new Set();
-      let amount = 0;
-      let count = 0;
-      let incomplete = false;
-      for (const row of form.querySelectorAll('.recipe')) {
-        const part = parts.get(row.querySelector('select').value);
+      const components = [...form.querySelectorAll('.recipe')].map(row=>{
         const quantity = row.querySelector('input');
-        if (!part || !quantity.validity.valid) { incomplete = true; continue; }
-        count++;
-        if (part.averageCost == null) missing.add(part.name);
-        else amount += part.averageCost * quantity.valueAsNumber;
-      }
-      const material = count && !missing.size && !incomplete ? Math.round(amount) : null;
+        return {id:row.querySelector('select').value,quantity:quantity.validity.valid ? quantity.valueAsNumber : null};
+      });
+      const {material,unpriced}=estimateMaterials(components,parts);
       const price = form.elements.price;
       const profit = material !== null && Number.isFinite(price.valueAsNumber) && price.validity.valid
         ? Math.round(price.valueAsNumber*100) - material : null;
@@ -606,8 +682,8 @@
       profitOutput.textContent = profit === null ? '—' : money(profit);
       profitOutput.classList.toggle('negative',profit !== null && profit < 0);
       const message = form.querySelector('[data-cost-message]');
-      message.hidden = !missing.size;
-      message.textContent = missing.size ? 'No active unit cost for '+[...missing].join(', ')+'.' : '';
+      message.hidden = !unpriced.size;
+      message.textContent = unpriced.size ? 'No active unit cost for '+[...unpriced].join(', ')+'.' : '';
     }
 
     function cartSummary() {
@@ -674,7 +750,7 @@
       if (field.form?.elements.purchaseType && ['purchasePrice','purchaseQuantity'].includes(field.name)) {
         updatePurchaseFields(field.form);
       }
-      if (field.form?.dataset.form==='savePackage' && ['price','part','quantity'].includes(field.name)) packageMargin(field.form);
+      if (field.form?.dataset.form==='savePackage' && ['price','quantity'].includes(field.name)) packageMargin(field.form);
       if (field.closest('[data-order-line]')) orderEstimate(field.form);
       const id=field.dataset.quantity;
       if (!id) return;
@@ -693,6 +769,10 @@
       dialog.querySelector('[data-action=order]').disabled=Boolean(warning);
     });
     document.addEventListener('change',event=>{
+      if (event.target.name==='part' && event.target.form?.dataset.form==='savePackage') {
+        refreshComponentSelectors(event.target.form);
+        packageMargin(event.target.form);
+      }
       if (event.target.name === 'purchaseType' && event.target.form?.elements.purchaseType) {
         const form = event.target.form;
         form.elements.purchasePrice.value = '';
@@ -739,6 +819,7 @@
           case 'openingCost': setOpeningCost(id); break;
           case 'purchaseHistory': await showPurchaseHistory(id); break;
           case 'editPackage': editPackage(id); break;
+          case 'addExpense': addExpense(); break;
           case 'assemblyDetails': await showAssemblyDetails(id); break;
           case 'deletePackage': confirmDeletePackage(id); break;
           case 'editOrder': editOrder(id); break;
@@ -758,16 +839,19 @@
             }
             break;
           case 'addComponent':
-            if ($('#recipe').children.length<40) {
+            if ($('#recipe').children.length<Math.min(40,state.data.parts.length)) {
+              const form = control.closest('form');
               $('#recipe').insertAdjacentHTML('beforeend',componentRow());
+              refreshComponentSelectors(form);
               $('#recipe').lastElementChild.querySelector('select').focus();
-              packageMargin(control.closest('form'));
+              packageMargin(form);
             }
             break;
           case 'removeComponent':
             if ($('#recipe').children.length>1) {
               const form = control.closest('form');
               control.closest('.recipe').remove();
+              refreshComponentSelectors(form);
               packageMargin(form);
             }
             break;
@@ -819,6 +903,16 @@
           renderSystem();
           if (dialog.open) showSystemKey(id,key);
           else notice('Access key updated.');
+          return;
+        }
+        if (name==='saveExpense') {
+          const token = state.token;
+          form.dataset.expenseKey ||= crypto.randomUUID();
+          await rpc(name,{...data,key:form.dataset.expenseKey,amount:Math.round(Number(data.amount)*100)});
+          if (state.token!==token) return;
+          if (form.isConnected && dialog.open) dialog.close();
+          if (state.tab==='finance') render();
+          notice('Supply expense saved.');
           return;
         }
         if (name==='submitOrder') {
