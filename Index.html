@@ -30,6 +30,9 @@
     th,td{border-bottom:1px solid var(--line);padding:10px 15px}th{background:#f2eadf;font-size:.875rem}tbody tr:last-child td{border:0}
     dialog{width:min(610px,calc(100% - 24px));max-height:calc(100dvh - 24px);margin:auto;padding:22px;border:1px solid var(--line);border-radius:16px;background:var(--surface);color:#2d241e;box-shadow:0 22px 85px #30241b36}
     dialog::backdrop{background:#2c211bb0}.dialog-head{margin-bottom:16px;align-items:start}.stack{display:grid;gap:13px}.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .assembly-image{display:block;width:100%;height:min(45dvh,320px);object-fit:contain;border-radius:10px;background:#f2eadf}
+    .assembly-parts{white-space:normal}.assembly-parts th:last-child,.assembly-parts td:last-child{text-align:right}
+    .assembly-parts td:first-child{overflow-wrap:anywhere}
     label{display:grid;gap:5px;font-size:.9rem;font-weight:650} input,select,textarea{background:#fff;border:1px solid #a69a8b;border-radius:7px;min-height:42px;padding:7px 10px;color:#29211b;min-width:0;width:100%}textarea{resize:vertical}input[type=color]{padding:3px} .check{display:flex;gap:7px;align-items:center}.check input{width:17px;min-height:0}
     .recipe{display:grid;grid-template-columns:minmax(0,1fr) 82px 37px;gap:8px;align-items:end}.cart-line{display:grid;grid-template-columns:minmax(0,1fr) 72px 38px;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px} .cart-line strong{overflow-wrap:anywhere}
     .purchase-fields{background:#f7f1e8;border:1px solid var(--line);border-radius:9px;padding:12px}
@@ -243,21 +246,51 @@
 
     function renderPackages(packages) {
       $('#panel').innerHTML='<div class="row section-head"><h2>Product packages</h2>'+button('New package','editPackage','','')+'</div>'+
-        (packages.length ? '<div class="tiles">'+packages.map(kit=> {
-          const grey=kit.available===0;
-          return '<article class="tile'+(grey?' off':'')+'" aria-labelledby="title-'+kit.id+'">'+
+        (packages.length ? '<div class="tiles">'+packages.map(kit=>
+          '<article class="tile" data-kit="'+kit.id+'" aria-labelledby="title-'+kit.id+'">'+
             (kit.hasPhoto?'<img class="tile-cover" data-photo="'+kit.id+'" alt="" hidden>':'')+
-            '<div class="tile-body"><div class="row"><span class="badge'+(grey?' off':'')+'">'+(grey?'Unavailable':'Available')+
-            '</span><span class="price">'+money(kit.price)+'</span></div><h3 id="title-'+kit.id+'">'+safe(kit.name)+'</h3>'+
+            '<div class="tile-body"><div class="row"><span class="badge" data-stock-status></span>'+
+            '<span class="price">'+money(kit.price)+'</span></div><h3 id="title-'+kit.id+'">'+safe(kit.name)+'</h3>'+
             (kit.description?'<p class="muted small">'+safe(kit.description)+'</p>':'')+
-            (grey?'<ul class="shortages">'+kit.missing.map(part=>'<li>'+safe(part.name)+' · '+part.stock+' on hand, '+part.quantity+' needed</li>').join('')+'</ul>'
-              :'<p class="muted small">'+kit.available+' can be assembled</p>')+'</div><div class="actions tile-actions">'+
-            button('Edit package','editPackage',kit.id)+button('Add to Cart','add',kit.id,'',grey)+
-            button('Delete','deletePackage',kit.id)+'</div></article>';
-        }).join('')+'</div>':'<p class="surface empty">Add inventory parts, then create your first package.</p>');
+            '<div data-buildable aria-live="polite"></div></div><div class="actions tile-actions">'+
+            button('Edit package','editPackage',kit.id)+button('Add to Cart','add',kit.id,'')+
+            button('View Assembly Details','assemblyDetails',kit.id)+button('Delete','deletePackage',kit.id)+'</div></article>'
+        ).join('')+'</div>':'<p class="surface empty">Add inventory parts, then create your first package.</p>');
+      updateCartAvailability();
       for (const image of document.querySelectorAll('[data-photo]')) asset('package',image.dataset.photo).then(url=>{
         if (url && image.isConnected) { image.src=url; image.hidden=false; }
       }).catch(()=>{});
+    }
+
+    function packageAvailability(kit, reserved) {
+      const remaining = kit.components.map(part=>({
+        ...part, remaining: Math.max(0, part.stock - (reserved.get(part.id)?.quantity || 0)),
+      }));
+      const buildable = remaining.length
+        ? Math.min(...remaining.map(part=>Math.floor(part.remaining / part.quantity))) : 0;
+      return { buildable, missing: remaining.filter(part=>part.remaining < part.quantity) };
+    }
+
+    function updateCartAvailability(summary) {
+      if (state.tab!=='packages') return;
+      const reserved = (summary || cartSummary()).reserved;
+      const packages = new Map(state.data.packages.map(kit=>[kit.id,kit]));
+      for (const tile of main.querySelectorAll('[data-kit]')) {
+        const kit = packages.get(tile.dataset.kit);
+        const {buildable,missing} = packageAvailability(kit,reserved);
+        const off = buildable===0;
+        const badge = tile.querySelector('[data-stock-status]');
+        tile.classList.toggle('off',off);
+        badge.classList.toggle('off',off);
+        badge.textContent = off ? 'Unavailable' : 'Available';
+        const status = tile.querySelector('[data-buildable]');
+        const message = '<p class="muted small">'+buildable+' buildable after cart</p>'+
+          (missing.length?'<ul class="shortages">'+missing.map(part=>
+            '<li>'+safe(part.name)+' · '+part.remaining+' remaining, '+part.quantity+' needed</li>').join('')+'</ul>':'');
+        if (status.innerHTML!==message) status.innerHTML=message;
+        const add = tile.querySelector('[data-action="add"]');
+        add.disabled = off || (state.cart.get(kit.id)?.quantity || 0)>=99;
+      }
     }
 
     function renderParts(parts) {
@@ -267,7 +300,8 @@
           '<tr><td>'+safe(part.sku)+'</td><td>'+safe(part.name)+'</td><td>'+part.stock+'</td><td>'+safe(part.supplier || '—')+
           '</td><td>'+(part.stock && part.averageCost == null?'Uncosted':unitMoney(part.averageCost))+'</td><td><span class="badge'+
           (part.stock<=part.threshold?' off':'')+'">'+(part.stock===0?'Out of stock':part.stock<=part.threshold?'Low stock':'In stock')+
-          '</span></td><td><div class="actions">'+button('Edit Part','editPart',part.id)+button('Price history','purchaseHistory',part.id)+'</div></td></tr>').join('')+
+          '</span></td><td><div class="actions">'+button('Edit Part','editPart',part.id)+button('Price history','purchaseHistory',part.id)+
+          button('Delete','deletePart',part.id)+'</div></td></tr>').join('')+
         '</tbody></table></div>':'<p class="surface empty">Add your first inventory part to track stock.</p>');
     }
 
@@ -487,6 +521,42 @@
         (component.quantity||1)+'" required></label><button type="button" class="btn secondary icon" data-action="removeComponent" aria-label="Remove component">×</button></div>';
     }
 
+    function confirmDeletePart(id) {
+      const part = state.data.parts.find(item=>item.id===id);
+      if (!part) return;
+      const usedBy = state.data.packages.filter(kit=>kit.components.some(component=>component.id===id));
+      if (usedBy.length) {
+        show('Part is used in packages','<div class="stack"><p>Remove <strong>'+safe(part.name)+
+          '</strong> from these package recipes before deleting it.</p><ul class="shortages">'+
+          usedBy.map(kit=>'<li>'+safe(kit.name)+'</li>').join('')+'</ul>'+button('Done','close')+'</div>');
+        return;
+      }
+      show('Delete part','<form class="stack" data-form="deletePart" data-id="'+safe(id)+
+        '" data-revision="'+part.revision+'"><p>Remove <strong>'+safe(part.name)+'</strong> ('+safe(part.sku)+
+        ') from inventory?</p><p class="muted small">'+part.stock+' on hand will be removed from active inventory. Purchase history stays in the spreadsheet.</p>'+
+        '<div class="actions">'+button('Cancel','close')+'<button class="btn danger">Delete part</button></div></form>');
+    }
+
+    async function showAssemblyDetails(id) {
+      const kit = state.data.packages.find(item=>item.id===id);
+      if (!kit) return;
+      const parts = new Map(state.data.parts.map(part=>[part.id,part]));
+      show('Assembly details','<div class="stack"><h3>'+safe(kit.name)+'</h3>'+
+        (kit.hasPhoto?'<img class="assembly-image" alt="'+safe(kit.name)+'" hidden><p class="muted small" data-assembly-photo-status role="status">Loading package photo…</p>'
+          :'<p class="muted small">No package photo uploaded.</p>')+
+        '<div class="surface scroll"><table class="assembly-parts"><thead><tr><th scope="col">Part</th><th scope="col">SKU</th>'+
+        '<th scope="col">Quantity per kit</th></tr></thead><tbody>'+kit.components.map(part=>
+          '<tr><td>'+safe(part.name)+'</td><td>'+safe(parts.get(part.id)?.sku || '—')+'</td><td>'+part.quantity+'</td></tr>').join('')+
+        '</tbody></table></div>'+button('Done','close')+'</div>');
+      if (!kit.hasPhoto) return;
+      const photo = dialog.querySelector('.assembly-image');
+      const status = dialog.querySelector('[data-assembly-photo-status]');
+      const url = await asset('package',kit.id).catch(()=>null);
+      if (!dialog.open || !photo.isConnected) return;
+      if (url) { photo.src=url; photo.hidden=false; status.hidden=true; }
+      else status.textContent = 'Package photo unavailable.';
+    }
+
     function editPackage(id) {
       if (!state.data.parts.length) return notice('Add an inventory part before creating a package.');
       const kit=state.data.packages.find(item=>item.id===id);
@@ -555,7 +625,7 @@
         }
         return {id,kit,quantity:line.quantity};
       });
-      return {lines,total,shortages:[...parts.values()].filter(part=>part.stock<part.quantity)};
+      return {lines,total,reserved:parts,shortages:[...parts.values()].filter(part=>part.stock<part.quantity)};
     }
 
     function orderWarning(summary) {
@@ -614,6 +684,7 @@
         renderHeader();
       }
       const summary=cartSummary();
+      updateCartAvailability(summary);
       const invalid=[...dialog.querySelectorAll('[data-quantity]')].some(input=>!input.checkValidity());
       const warning=invalid?'Enter quantities from 1 to 99.':orderWarning(summary);
       $('#cart-total').textContent=money(summary.total);
@@ -662,11 +733,13 @@
             if (id==='orders') state.orders=null;
             render(); $('[data-action=tab][data-id="'+id+'"]').focus(); break;
           case 'editPart': editPart(id); break;
+          case 'deletePart': confirmDeletePart(id); break;
           case 'editPartInfo': editPartInfo(id); break;
           case 'restockPart': restockPart(id); break;
           case 'openingCost': setOpeningCost(id); break;
           case 'purchaseHistory': await showPurchaseHistory(id); break;
           case 'editPackage': editPackage(id); break;
+          case 'assemblyDetails': await showAssemblyDetails(id); break;
           case 'deletePackage': confirmDeletePackage(id); break;
           case 'editOrder': editOrder(id); break;
           case 'deleteOrder': confirmDeleteOrder(id); break;
@@ -701,11 +774,13 @@
           case 'add': {
             const kit=state.data.packages.find(item=>item.id===id);
             const quantity=(state.cart.get(id)?.quantity||0)+1;
-            if (quantity>Math.min(99,kit.available)) return notice('There is not enough stock for another package.');
-            state.cart.set(id,{quantity}); state.orderKey=null; renderHeader(); notice('Added to cart.'); break;
+            if (!kit || quantity>99 || !packageAvailability(kit,cartSummary().reserved).buildable) {
+              return notice('Another package cannot be added with the current cart quantities.');
+            }
+            state.cart.set(id,{quantity}); state.orderKey=null; renderHeader(); updateCartAvailability(); notice('Added to cart.'); break;
           }
           case 'cart': showCart(); break;
-          case 'remove': state.cart.delete(id); state.orderKey=null; renderHeader(); showCart(); break;
+          case 'remove': state.cart.delete(id); state.orderKey=null; renderHeader(); updateCartAvailability(); showCart(); break;
           case 'order': showOrder(); break;
           case 'signOut': await rpc('signOut'); signInView(); break;
         }
@@ -805,12 +880,12 @@
         }
         if (dialog.open) dialog.close();
         accept(result);
-        const notices = {saveBrand:'Branding saved.',savePart:'Part saved.',editPartInfo:'Part info saved.',
+        const notices = {saveBrand:'Branding saved.',savePart:'Part saved.',editPartInfo:'Part info saved.',deletePart:'Part deleted.',
           restockPart:'Restock saved.',savePackage:'Package saved.',deletePackage:'Package deleted.',
           updateOrder:'Order updated.',deleteOrder:'Order deleted and stock returned.'};
         notice(notices[name]);
       } catch(error) {
-        if (error.code==='STALE' && ['submitOrder','updateOrder','deleteOrder'].includes(name)) {
+        if (error.code==='STALE' && ['deletePart','submitOrder','updateOrder','deleteOrder'].includes(name)) {
           try {
             state.orders=null;
             accept(await rpc('dashboard'));

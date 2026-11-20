@@ -1,7 +1,7 @@
 const ROOT_NAME = 'Inventory Management System';
 const COLUMNS = {
   Settings: ['Key', 'Value'],
-  Parts: ['ID', 'SKU', 'Part', 'On hand', 'Low threshold', 'Revision', 'Supplier name', 'Stock value centavos'],
+  Parts: ['ID', 'SKU', 'Part', 'On hand', 'Low threshold', 'Revision', 'Supplier name', 'Stock value centavos', 'Deleted UTC'],
   Packages: ['ID', 'Package', 'Description', 'Price centavos', 'Recipe JSON', 'Photo file', 'Revision', 'Deleted UTC'],
   Orders: ['Order ID', 'Submitted UTC', 'Customer', 'Email', 'Phone', 'Address', 'Notes',
     'Currency', 'Total centavos', 'Packages JSON', 'Components deducted JSON', 'Request ID', 'Status', 'Revision', 'Deleted UTC'],
@@ -60,6 +60,7 @@ function action(name, token, data) {
       case 'asset': return { ok: true, data: readAsset_(tenant, data) };
       case 'savePart': return { ok: true, data: locked_(() => savePart_(tenant, data)) };
       case 'editPartInfo': return { ok: true, data: locked_(() => editPartInfo_(tenant, data)) };
+      case 'deletePart': return { ok: true, data: locked_(() => deletePart_(tenant, data)) };
       case 'restockPart': return { ok: true, data: locked_(() => restockPart_(tenant, data)) };
       case 'setPartOpeningCost': return { ok: true, data: locked_(() => setPartOpeningCost_(tenant, data)) };
       case 'purchaseHistory': return { ok: true, data: purchaseHistory_(tenant, data.id) };
@@ -163,7 +164,7 @@ function createTenant_(email, rawBrand) {
   });
   write_(sheet, requests);
   const tenant = { id, email, brand, digest: '', folderId: folder.id, sheetId: file.id, generation: 1,
-    purchaseSchema: 1, orderSchema: 1, packageSchema: 1 };
+    purchaseSchema: 1, orderSchema: 1, packageSchema: 1, partSchema: 1 };
   PropertiesService.getScriptProperties().setProperty('tenant:' + id, JSON.stringify(tenant));
   return tenant;
 }
@@ -344,11 +345,15 @@ function write_(sheet, requests) {
   Sheets.Spreadsheets.batchUpdate({ requests }, sheet.id);
 }
 
+function hasCurrentSchema_(tenant) {
+  return tenant.purchaseSchema === 1 && tenant.orderSchema === 1 && tenant.packageSchema === 1 && tenant.partSchema === 1;
+}
+
 function ensureWorkspaceSchema_(tenant) {
-  if (tenant.purchaseSchema === 1 && tenant.orderSchema === 1 && tenant.packageSchema === 1) return;
+  if (hasCurrentSchema_(tenant)) return;
   locked_(() => {
     const current = readTenant_(tenant.id);
-    if (current.purchaseSchema === 1 && current.orderSchema === 1 && current.packageSchema === 1) return;
+    if (hasCurrentSchema_(current)) return;
     const sheet = book_(current.sheetId);
     const requests = [];
     if (current.purchaseSchema !== 1) {
@@ -357,24 +362,26 @@ function ensureWorkspaceSchema_(tenant) {
         requests.push({ addSheet: { properties: { title: 'Purchases', sheetId, gridProperties: { frozenRowCount: 1 } } } },
           update_(sheetId, 0, 0, [COLUMNS.Purchases]));
       }
-      requests.push(update_(sheet.tab('Parts'), 0, 6, [COLUMNS.Parts.slice(6)]));
+      requests.push(update_(sheet.tab('Parts'), 0, 6, [COLUMNS.Parts.slice(6, 8)]));
     }
     if (current.orderSchema !== 1) requests.push(update_(sheet.tab('Orders'), 0, 12, [COLUMNS.Orders.slice(12)]));
     if (current.packageSchema !== 1) requests.push(update_(sheet.tab('Packages'), 0, 7, [COLUMNS.Packages.slice(7)]));
+    if (current.partSchema !== 1) requests.push(update_(sheet.tab('Parts'), 0, 8, [COLUMNS.Parts.slice(8)]));
     write_(sheet, requests);
     current.purchaseSchema = 1;
     current.orderSchema = 1;
     current.packageSchema = 1;
+    current.partSchema = 1;
     PropertiesService.getScriptProperties().setProperty('tenant:' + current.id, JSON.stringify(current));
   });
 }
 
-function parts_(sheet) {
-  return rows_(sheet, 'Parts').map(([id, sku, name, stock, threshold, revision, supplier, value], index) => {
+function parts_(sheet, includeDeleted = false) {
+  return rows_(sheet, 'Parts').map(([id, sku, name, stock, threshold, revision, supplier, value, deleted], index) => {
     const stockValue = stock === 0 ? 0 : Number.isSafeInteger(value) && value >= 0 ? value : null;
-    return { id, sku, name, stock, threshold, revision, supplier: supplier || '', stockValue,
+    return { id, sku, name, stock, threshold, revision, supplier: supplier || '', stockValue, deleted,
       averageCost: stock > 0 && stockValue !== null ? stockValue / stock : null, index: index + 1 };
-  }).filter(part => part.id);
+  }).filter(part => part.id && (includeDeleted || !part.deleted));
 }
 
 function packages_(sheet, includeDeleted = false) {
@@ -405,7 +412,7 @@ function dashboard_(tenant) {
     tenantId: tenant.id,
     brand: { storeName: settings.storeName || tenant.brand, accent: settings.accent, background: settings.background,
       ink: settings.ink, hasLogo: Boolean(settings.logo), hasBackdrop: Boolean(settings.backdrop) },
-    parts: parts.map(({ index, ...part }) => part),
+    parts: parts.map(({ index, deleted, ...part }) => part),
     packages: packages_(sheet).map(kit => packageStatus_(kit, partMap)),
   };
 }
@@ -430,7 +437,7 @@ function savePart_(tenant, data) {
   if (data.purchase) fail_('Add the part first, then use Restock to log a purchase.');
   const sheet = book_(tenant.sheetId);
   const supplier = text_(data.supplier, 'supplier name', 120, false);
-  const sku = generateSku_(settings_(sheet).storeName || tenant.brand, parts_(sheet));
+  const sku = generateSku_(settings_(sheet).storeName || tenant.brand, parts_(sheet, true));
   const name = text_(data.name, 'part name', 100);
   const stock = integer_(data.stock, 'On hand', 1000000);
   const threshold = integer_(data.threshold, 'Low-stock threshold', 1000000);
@@ -466,6 +473,22 @@ function editPartInfo_(tenant, data) {
     threshold: integer_(data.threshold, 'Low-stock threshold', 1000000),
     stock, stockValue: prorate_(part.stockValue, part.stock, stock),
   }, null);
+  return dashboard_(tenant);
+}
+
+function deletePart_(tenant, data) {
+  const sheet = book_(tenant.sheetId);
+  const part = parts_(sheet, true).find(item => item.id === data.id);
+  if (!part || (!part.deleted && part.revision !== data.revision)) {
+    fail_('The part changed. Refresh your inventory and try again.', 'STALE');
+  }
+  if (part.deleted) return dashboard_(tenant);
+  const usedBy = packages_(sheet).filter(kit => kit.recipe.some(component => component.id === part.id));
+  if (usedBy.length) {
+    fail_('Remove this part from these packages before deleting it: ' + usedBy.map(kit => kit.name).join(', ') + '.', 'STALE');
+  }
+  const row = [part.revision + 1, part.supplier, part.stockValue ?? '', new Date().toISOString()];
+  write_(sheet, [update_(sheet.tab('Parts'), part.index, 5, [row])]);
   return dashboard_(tenant);
 }
 
@@ -656,7 +679,7 @@ function prepareOrder_(sheet, selected, previous = []) {
 }
 
 function balanceOrderStock_(sheet, prior, required) {
-  const parts = new Map(parts_(sheet).map(part => [part.id, part]));
+  const parts = new Map(parts_(sheet, true).map(part => [part.id, part]));
   const previous = new Map(prior.map(item => [item.id, item]));
   const tab = sheet.tab('Parts');
   const deductions = [];
@@ -671,6 +694,7 @@ function balanceOrderStock_(sheet, prior, required) {
     let cost = oldCost;
     if (change) {
       if (!part) fail_('An order component is missing from inventory.', 'STALE');
+      if (part.deleted && change > 0) fail_(part.name + ' was removed from inventory.', 'STALE');
       if (part.stock < change) {
         fail_(part.name + ' needs ' + change + ' more units. ' + part.stock + ' are on hand.', 'STALE');
       }
