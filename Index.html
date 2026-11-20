@@ -19,6 +19,8 @@
     main{padding-block:34px 58px}.intro{display:grid;gap:8px;margin-bottom:24px}
     .muted{color:var(--muted)}.intro .muted{color:inherit}.small{font-size:.875rem}.btn{min-height:42px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 14px;border-radius:8px;background:var(--accent);border:1px solid transparent;color:var(--button-text);font-size:.9rem;font-weight:650;line-height:1.25}
     .btn:not(:disabled):hover{filter:brightness(.92)}.secondary{background:var(--surface);color:#32271f;border-color:var(--line)}.icon{padding:6px 10px}
+    .gear-button{width:44px;min-height:44px;flex:none;font-size:1.26rem;line-height:1}
+    #header-actions{flex:0 0 auto;flex-wrap:nowrap}
     .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:23px}
     .metric{background:var(--surface);color:#2d241e;border:1px solid var(--line);border-radius:12px;padding:13px 16px;display:grid;gap:5px}.metric strong{font:500 2rem Georgia,serif}
     .tabs{border-bottom:1px solid color-mix(in srgb,var(--ink) 23%,transparent);padding-bottom:12px;margin-bottom:16px}.tabs .btn[aria-pressed=true]{background:var(--accent);color:var(--button-text)}
@@ -47,6 +49,9 @@
     .recipe{display:grid;grid-template-columns:minmax(0,1fr) 82px 37px;gap:8px;align-items:end}.cart-line{display:grid;grid-template-columns:minmax(0,1fr) 72px 38px;gap:8px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:10px} .cart-line strong{overflow-wrap:anywhere}
     .purchase-fields{background:#f7f1e8;border:1px solid var(--line);border-radius:9px;padding:12px}
     .locked-field,.locked-field input{pointer-events:none}.locked-field input{background:#efebe5;color:#625a52}
+    .field-error{color:#962c28;font-size:.82rem;font-weight:550}
+    [aria-invalid="true"]{border-color:#962c28}
+    .form-actions{border-top:1px solid var(--line);padding-top:12px}
     .margin-summary{background:#f7f1e8;border:1px solid var(--line);border-radius:9px;padding:12px}
     .negative{color:#772f23}.danger{background:#8a3b30;color:#fff}.status-delivery{background:#e2eaf4;color:#334b69}
     .status-assembling{background:#f4e8d0;color:#705023}
@@ -59,6 +64,7 @@
     .system-grid h2{margin-bottom:8px}.system-key{font:0.875rem/1.5 monospace;overflow-wrap:anywhere}
     @media(max-width:850px){.tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.system-grid{grid-template-columns:1fr}}
     @media(max-width:550px){.wrap{width:calc(100% - 28px)}main{padding-top:24px}.tiles{grid-template-columns:1fr}.metric{padding:10px}.metric span{font-size:.78rem}.brand strong{font-size:1.2rem}.actions{gap:5px}.bar .btn{padding-inline:8px}.pair{gap:7px}}
+    @media(max-width:430px){dialog{padding:16px}.pair{grid-template-columns:minmax(0,1fr);gap:10px}.bar{gap:8px}.bar .brand{gap:6px}#logo,.mark{width:32px;height:32px}.form-actions .btn{flex:1}}
   </style>
 </head>
 <body>
@@ -235,7 +241,9 @@
 
     function renderHeader() {
       const count = [...state.cart.values()].reduce((sum,line)=>sum+line.quantity,0);
-      $('#header-actions').innerHTML = button('Cart ('+count+')','cart','','')+button('Sign out','signOut');
+      $('#header-actions').innerHTML = button('Cart ('+count+')','cart','','')+
+        '<button type="button" class="btn secondary gear-button" data-action="branding" aria-label="Branding settings" title="Branding settings">'+
+        '<span aria-hidden="true">⚙</span></button>'+button('Sign out','signOut');
     }
 
     function render() {
@@ -247,13 +255,12 @@
       main.innerHTML='<section><div class="intro"><h1>Inventory dashboard</h1><p class="muted">Manage package recipes, stock, and owner-logged orders.</p></div>'+
         '<div class="metrics">'+metrics.map(([name,count])=>'<div class="metric"><span>'+name+'</span><strong>'+count+'</strong></div>').join('')+
         '</div><dl class="surface order-summary" id="order-summary" aria-label="Order status overview" aria-live="polite">'+orderSummary(state.data.orderStatusCounts)+
-        '</dl><nav class="tabs" aria-label="Workspace">'+[['packages','Packages'],['parts','Inventory parts'],['orders','Orders'],['finance','Financial Report'],['brand','Branding']].map(([id,label])=>
+        '</dl><nav class="tabs" aria-label="Workspace">'+[['packages','Packages'],['parts','Inventory parts'],['orders','Orders'],['finance','Financial Report']].map(([id,label])=>
           '<button type="button" class="btn secondary" data-action="tab" data-id="'+id+'" aria-pressed="'+(state.tab===id)+'">'+label+'</button>').join('')+
         '</nav><div id="panel"></div></section>';
       if (state.tab==='parts') return renderParts(parts);
       if (state.tab==='orders') return renderOrders();
       if (state.tab==='finance') return renderFinance();
-      if (state.tab==='brand') return renderBrand(state.data.brand);
       renderPackages(packages);
     }
 
@@ -470,15 +477,17 @@
     }
 
     const imageInput = name => '<input type="file" name="'+name+'" accept="image/jpeg,image/png,image/webp">';
-    function renderBrand(brand) {
+    function showBrandSettings() {
+      const brand = state.data.brand;
       const color = (label,key) => '<label>'+label+'<input name="'+key+'" type="color" value="'+safe(brand[key])+'"></label>';
-      $('#panel').innerHTML='<div class="row section-head"><h2>Branding settings</h2></div><form class="surface empty stack" data-form="saveBrand">'+
+      show('Branding settings','<form class="stack" data-form="saveBrand">'+
         '<label>Store name<input name="storeName" value="'+safe(brand.storeName)+'" maxlength="80" required></label><div class="pair">'+
         color('Theme color','accent')+color('Page background color','background')+'</div>'+color('Page text color','ink')+
         '<div class="pair"><label>Store logo'+imageInput('logo')+'</label><label>Page background image'+imageInput('backdrop')+'</label></div>'+
         (brand.hasLogo?'<label class="check"><input type="checkbox" name="removelogo">Remove current logo</label>':'')+
         (brand.hasBackdrop?'<label class="check"><input type="checkbox" name="removebackdrop">Remove current background image</label>':'')+
-        '<p class="muted small">JPEG, PNG, or WebP attachments up to 1 MB each.</p><div><button class="btn">Save branding</button></div></form>';
+        '<p class="muted small">JPEG, PNG, or WebP attachments up to 1 MB each.</p><div class="actions form-actions">'+
+        button('Cancel','close')+'<button class="btn">Save branding</button></div></form>');
     }
 
     function partForm(action, part) {
@@ -486,16 +495,51 @@
     }
 
     function disabledPartField(label, name, value) {
-      return '<label class="locked-field">'+label+'<input name="'+name+'" '+(name==='stock'?'type="number" ':'')+'value="'+safe(value)+'" disabled></label>';
+      return '<label class="locked-field">'+label+'<input name="'+name+'" '+(name==='stock'?'type="number" ':'')+'value="'+safe(value)+'" readonly disabled></label>';
     }
 
-    function purchaseFields() {
-      return '<label>Purchase Type<select name="purchaseType" required><option value="">Choose a purchase type</option>'+
-        '<option>Bulk</option><option>Per Item</option></select></label>'+
+    function requiredTextField(label, name, maxlength, value = '') {
+      return '<label>'+label+'<input name="'+name+'" maxlength="'+maxlength+'" value="'+safe(value)+
+        '" required data-validate-text aria-describedby="'+name+'-field-error">'+fieldErrorMarkup(name)+'</label>';
+    }
+
+    function fieldErrorMarkup(name) {
+      return '<span class="field-error" id="'+name+'-field-error" data-field-error="'+name+'" aria-live="polite" hidden></span>';
+    }
+
+    function showFieldError(field, message) {
+      field.setCustomValidity(message);
+      field.setAttribute('aria-invalid',String(Boolean(message)));
+      const help = field.form.querySelector('[data-field-error="'+field.name+'"]');
+      help.textContent = message;
+      help.hidden = !message;
+    }
+
+    function validateTextField(field) {
+      const value = field.value.trim();
+      const isName = field.name==='name';
+      let message = !value ? (isName?'Enter a name.':'Enter a supplier name.') : '';
+      if (value && isName) {
+        const normalize = text => String(text ?? '').trim().normalize('NFC').toLowerCase();
+        const records = field.form.dataset.form==='savePackage' ? state.data.packages : state.data.parts;
+        const key = normalize(value);
+        const current = records.find(item=>item.id===field.form.dataset.id);
+        if (key!==normalize(current?.name) && records.some(item=>normalize(item.name)===key)) {
+          message = 'This name already exists. Enter a different name.';
+        }
+      }
+      showFieldError(field,message);
+    }
+
+    function purchaseFields(supplier) {
+      return '<div class="pair">'+requiredTextField('Supplier Name','supplier',120,supplier)+
+        '<label>Purchase Type<select name="purchaseType" required><option value="">Choose a purchase type</option>'+
+        '<option>Bulk</option><option>Per Item</option></select></label></div>'+
         '<div class="stack purchase-fields" data-purchase hidden><div class="pair">'+
         '<label><span data-purchase-price-label>Price (₱)</span><input name="purchasePrice" type="number" min="0" step=".01" disabled></label>'+
         '<label><span data-purchase-quantity-label>Quantity Purchased</span><input name="purchaseQuantity" type="number" min="1" max="1000000" disabled></label>'+
-        '</div><p class="muted small" data-purchase-preview></p></div>';
+        '</div><div data-bulk-cost hidden>'+disabledPartField('Cost per Piece','costPerPiece','—')+'</div>'+
+        '<p class="muted small" data-purchase-preview></p></div>';
     }
 
     function openingCostField(required = false) {
@@ -507,13 +551,23 @@
       show(consumable?'Add Consumable':'Add part',partForm('savePart')+
         (consumable?'<input type="hidden" name="consumable" value="yes">'+
           '<p class="muted small">New packages use one stock unit of this consumable per kit. Choose an inventory unit that matches what one kit uses.</p>':'')+
-        '<label>Part Name<input name="name" maxlength="100" required></label>'+
-        '<div class="pair">'+disabledPartField('SKU','sku','Generated on save')+
-        '<label>Supplier Name<input name="supplier" maxlength="120"></label></div><div class="pair">'+
+        requiredTextField(consumable?'Consumable Name':'Part Name','name',100)+
+        '<div class="pair">'+requiredTextField('Supplier Name','supplier',120)+disabledPartField('SKU','sku','Generated on save')+'</div><div class="pair">'+
         '<label><span data-stock-label>On Hand</span><input name="stock" type="number" min="0" max="1000000" value="0" required></label>'+
         '<label>Low Stock Threshold<input name="threshold" type="number" min="0" max="1000000" value="5" required></label></div>'+
-        openingCostField()+'<p class="muted small">Enter the cost of any units already on hand.</p>'+
-        '<button class="btn">'+(consumable?'Save consumable':'Save part')+'</button></form>');
+        '<div class="stack purchase-fields"><div class="pair"><label>Total On Hand Cost (₱)<input name="openingTotal" type="number" min="0" max="10000000000000" step=".01" aria-describedby="openingTotal-field-error">'+
+        fieldErrorMarkup('openingTotal')+'</label>'+disabledPartField('Cost per Piece','costPerPiece','—')+
+        '</div><p class="muted small">Enter the total paid for the units on hand. You can leave it blank if the cost is unknown.</p></div>'+
+        '<div class="actions form-actions">'+button('Cancel','close')+'<button class="btn">'+(consumable?'Save consumable':'Save part')+'</button></div></form>');
+    }
+
+    function updateOpeningCost(form) {
+      const {stock,openingTotal,costPerPiece} = form.elements;
+      const quantity = stock.valueAsNumber;
+      const total = openingTotal.valueAsNumber;
+      showFieldError(openingTotal,quantity===0 && total>0?'Enter an on-hand quantity greater than zero.':'');
+      costPerPiece.value = stock.validity.valid && quantity>0 && openingTotal.validity.valid && Number.isFinite(total)
+        ? unitMoney(Math.round(total*100)/quantity) : '—';
     }
 
     function editPart(id) {
@@ -528,11 +582,11 @@
       const part = state.data.parts.find(item=>item.id===id);
       if (!part) return;
       show('Edit Part Info',partForm('editPartInfo',part)+
-        '<label>Part Name<input name="name" maxlength="100" value="'+safe(part.name)+'" required></label>'+
+        requiredTextField(part.consumable?'Consumable Name':'Part Name','name',100,part.name)+
         '<div class="pair">'+disabledPartField('SKU','sku',part.sku)+disabledPartField('Supplier Name','supplier',part.supplier||'Not recorded')+'</div>'+
         '<div class="pair"><label>On Hand<input name="stock" type="number" min="0" max="1000000" value="'+part.stock+'" required></label>'+
         '<label>Low Stock Threshold<input name="threshold" type="number" min="0" max="1000000" value="'+part.threshold+'" required></label></div>'+
-        '<div class="actions">'+button('Back','editPart',id)+'<button class="btn">Save part info</button></div></form>');
+        '<div class="actions form-actions">'+button('Back','editPart',id)+'<button class="btn">Save part info</button></div></form>');
     }
 
     function restockPart(id) {
@@ -541,10 +595,10 @@
       const needsOpeningCost = part.stock > 0 && part.averageCost == null;
       show('Restock',partForm('restockPart',part)+disabledPartField('Part Name','name',part.name)+
         '<div class="pair">'+disabledPartField('SKU','sku',part.sku)+disabledPartField('Current On Hand','stock',part.stock)+'</div>'+
-        purchaseFields()+
+        purchaseFields(part.supplier)+
         (needsOpeningCost ? '<p class="alert">Set the opening cost for your existing stock before restocking.</p>'+
           '<div>'+button('Set opening unit cost','openingCost',id)+'</div>' : '')+
-        '<div class="actions">'+button('Back','editPart',id)+'<button class="btn" '+(needsOpeningCost?'disabled':'')+'>Save restock</button></div></form>');
+        '<div class="actions form-actions">'+button('Back','editPart',id)+'<button class="btn" '+(needsOpeningCost?'disabled':'')+'>Save restock</button></div></form>');
     }
 
     function setOpeningCost(id) {
@@ -557,10 +611,11 @@
     }
 
     function updatePurchaseFields(form) {
-      const {stock,purchasePrice,purchaseQuantity,purchaseType} = form.elements;
+      const {stock,purchasePrice,purchaseQuantity,purchaseType,costPerPiece} = form.elements;
       const logging = Boolean(purchaseType.value);
       const bulk = purchaseType.value === 'Bulk';
       form.querySelector('[data-purchase]').hidden = !logging;
+      form.querySelector('[data-bulk-cost]').hidden = !bulk;
       form.querySelector('[data-purchase-price-label]').textContent = bulk ? 'Total Price (₱)' : 'Unit Price (₱)';
       form.querySelector('[data-purchase-quantity-label]').textContent = bulk ? 'Total Quantity' : 'Quantity Purchased';
       for (const field of [purchasePrice,purchaseQuantity]) {
@@ -572,9 +627,10 @@
       const quantity = purchaseQuantity.valueAsNumber;
       const price = purchasePrice.valueAsNumber;
       const ready = quantity > 0 && Number.isFinite(price) && purchasePrice.validity.valid && purchaseQuantity.validity.valid;
+      costPerPiece.value = ready && bulk ? unitMoney(Math.round(price*100)/quantity) : '—';
       form.querySelector('[data-purchase-preview]').textContent = ready
-        ? (bulk ? 'Unit cost '+unitMoney(Math.round(price*100)/quantity) : 'Purchase total '+money(Math.round(price*100)*quantity))+
-          ' · Stock after purchase '+((stock.valueAsNumber||0)+quantity)
+        ? (bulk ? '' : 'Purchase total '+money(Math.round(price*100)*quantity)+' · ')+
+          'Stock after purchase '+((stock.valueAsNumber||0)+quantity)
         : 'The purchased quantity will be added to the on-hand stock above.';
     }
 
@@ -664,7 +720,7 @@
         [...consumables.values()].map(part=>({id:part.id,name:part.name,quantity:1}));
       const recipe = kit ? kit.components.filter(part=>!consumables.has(part.id)) : [];
       show(kit?'Edit package':'New package','<form data-form="savePackage" class="stack" data-id="'+safe(id)+'" data-revision="'+(kit?.revision||'')+'">'+
-        '<label>Package name<input name="name" maxlength="120" value="'+safe(kit?.name)+'" required></label>'+
+        requiredTextField('Package Name','name',120,kit?.name)+
         '<label>Description<textarea name="description" maxlength="450" rows="2">'+safe(kit?.description)+'</textarea></label>'+
         '<div class="pair"><label>Selling Price (₱)<input name="price" type="number" min="0" max="10000000" step=".01" value="'+
         (kit?(kit.price/100).toFixed(2):'')+'" required></label><label>Package photo'+imageInput('photo')+'</label></div>'+
@@ -677,7 +733,7 @@
             :'<ul class="shortages">'+attached.map(part=>'<li>'+safe(part.name)+' (1 per kit)</li>').join('')+'</ul>')+'</div>':'')+
         '<div class="stack margin-summary" aria-live="polite"><div class="row"><strong>Total Material Cost</strong><output data-material-cost>—</output></div>'+
         '<div class="row"><strong>Profit</strong><output data-profit>—</output></div><p data-cost-message class="muted small" hidden></p></div>'+
-        '<button class="btn">Save package</button>'+consumableCostNote+'</form>');
+        '<div class="actions form-actions">'+button('Cancel','close')+'<button class="btn">Save package</button></div>'+consumableCostNote+'</form>');
       const form = dialog.querySelector('form');
       refreshComponentSelectors(form);
       packageMargin(form);
@@ -786,6 +842,8 @@
 
     document.addEventListener('input',event=>{
       const field=event.target;
+      if (field.matches('[data-validate-text]')) validateTextField(field);
+      if (field.form?.dataset.form==='savePart' && ['stock','openingTotal'].includes(field.name)) updateOpeningCost(field.form);
       if (field.form?.elements.purchaseType && ['purchasePrice','purchaseQuantity'].includes(field.name)) {
         updatePurchaseFields(field.form);
       }
@@ -807,6 +865,9 @@
       $('#cart-warning').hidden=!warning;
       dialog.querySelector('[data-action=order]').disabled=Boolean(warning);
     });
+    document.addEventListener('invalid',event=>{
+      if (event.target.matches('[data-validate-text]') && !event.target.validity.customError) validateTextField(event.target);
+    },true);
     document.addEventListener('change',event=>{
       if (event.target.name==='part' && event.target.form?.dataset.form==='savePackage') {
         refreshComponentSelectors(event.target.form);
@@ -903,6 +964,7 @@
             state.cart.set(id,{quantity}); state.orderKey=null; renderHeader(); updateCartAvailability(); notice('Added to cart.'); break;
           }
           case 'cart': showCart(); break;
+          case 'branding': showBrandSettings(); break;
           case 'remove': state.cart.delete(id); state.orderKey=null; renderHeader(); updateCartAvailability(); showCart(); break;
           case 'order': showOrder(); break;
           case 'signOut': await rpc('signOut'); signInView(); break;
@@ -972,14 +1034,15 @@
           data.threshold=Number(data.threshold);
         }
         if (name==='savePart') data.consumable=data.consumable==='yes';
-        if (name==='savePart' || name==='setPartOpeningCost') {
+        if (name==='savePart') data.openingTotal=data.openingTotal!=='' ? Math.round(Number(data.openingTotal)*100) : null;
+        if (name==='setPartOpeningCost') {
           data.openingCost=data.openingCost!=='' ? Math.round(Number(data.openingCost)*100) : null;
         }
         if (name==='restockPart') {
           form.dataset.purchaseKey ||= crypto.randomUUID();
           data.purchase={key:form.dataset.purchaseKey,type:data.purchaseType,quantity:Number(data.purchaseQuantity),
-            price:Math.round(Number(data.purchasePrice)*100)};
-          delete data.purchaseType; delete data.purchaseQuantity; delete data.purchasePrice;
+            price:Math.round(Number(data.purchasePrice)*100),supplier:data.supplier};
+          delete data.purchaseType; delete data.purchaseQuantity; delete data.purchasePrice; delete data.supplier;
         }
         if (name==='savePackage') {
           data.price=Math.round(Number(data.price)*100);
@@ -1005,11 +1068,17 @@
         }
         if (dialog.open) dialog.close();
         accept(result);
+        if (name==='saveBrand') state.opener = $('[data-action="branding"]');
         const notices = {saveBrand:'Branding saved.',savePart:data.consumable?'Consumable saved.':'Part saved.',editPartInfo:'Part info saved.',deletePart:'Part deleted.',
           restockPart:'Restock saved.',savePackage:'Package saved.',deletePackage:'Package deleted.',
           updateOrder:'Order updated.',deleteOrder:'Order deleted and stock returned.'};
         notice(notices[name]);
       } catch(error) {
+        if (error.code==='DUPLICATE_NAME' && form.isConnected && dialog.open && form.elements.name) {
+          showFieldError(form.elements.name,error.message);
+          form.elements.name.focus();
+          return;
+        }
         if (error.code==='STALE' && ['deletePart','submitOrder','updateOrder','deleteOrder'].includes(name)) {
           try {
             state.orders=null;

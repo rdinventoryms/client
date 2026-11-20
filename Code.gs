@@ -312,6 +312,16 @@ function text_(value, label, max, required = true) {
   return clean;
 }
 
+function uniqueName_(value, label, max, records, previous) {
+  const name = text_(value, label.toLowerCase(), max);
+  const normalize = text => String(text ?? '').trim().normalize('NFC').toLowerCase();
+  const key = normalize(name);
+  if (key !== normalize(previous?.name) && records.some(record => normalize(record.name) === key)) {
+    fail_(label + ' already exists. Choose a different name.', 'DUPLICATE_NAME');
+  }
+  return name;
+}
+
 function integer_(value, label, max, min = 0) {
   if (!Number.isSafeInteger(value) || value < min || value > max) {
     fail_(label + ' must be a whole number from ' + min + ' to ' + max + '.');
@@ -479,20 +489,26 @@ function purchase_(data) {
   if (!UUID.test(String(data.key))) fail_('Invalid purchase reference.');
   const quantity = integer_(data.quantity, 'Purchase quantity', 1000000, 1);
   const price = integer_(data.price, 'Purchase price in centavos', data.type === 'Bulk' ? 1000000000000000 : 1000000000);
+  const supplier = text_(data.supplier, 'supplier name', 120);
   const value = data.type === 'Bulk' ? price : price * quantity;
-  return { type: data.type, key: data.key, quantity, value, unitCost: value / quantity };
+  return { type: data.type, key: data.key, supplier, quantity, value, unitCost: value / quantity };
 }
 
 function savePart_(tenant, data) {
   if (data.id) fail_('Refresh the app and choose Edit Part Info or Restock.');
   if (data.purchase) fail_('Add the part first, then use Restock to log a purchase.');
   const sheet = book_(tenant.sheetId);
-  const supplier = text_(data.supplier, 'supplier name', 120, false);
-  const sku = generateSku_(settings_(sheet).storeName || tenant.brand, parts_(sheet, true));
-  const name = text_(data.name, 'part name', 100);
+  const supplier = text_(data.supplier, 'supplier name', 120);
+  const records = parts_(sheet, true);
+  const name = uniqueName_(data.name, 'Part or consumable name', 100, records);
+  const sku = generateSku_(settings_(sheet).storeName || tenant.brand, records);
   const stock = integer_(data.stock, 'On hand', 1000000);
   const threshold = integer_(data.threshold, 'Low-stock threshold', 1000000);
-  const stockValue = !stock ? 0 : data.openingCost == null ? null : openingValue_(data.openingCost, stock);
+  const openingTotal = data.openingTotal == null
+    ? (data.openingCost == null ? null : openingValue_(data.openingCost, stock))
+    : integer_(data.openingTotal, 'Total on-hand cost in centavos', 1000000000000000);
+  if (!stock && openingTotal) fail_('Enter an on-hand quantity greater than zero to record a total cost.');
+  const stockValue = stock ? openingTotal : 0;
   writePart_(sheet, { id: Utilities.getUuid(), sku, name, stock, threshold, supplier, stockValue, revision: 0,
     consumable: data.consumable === true }, null);
   return dashboard_(tenant);
@@ -509,19 +525,20 @@ function generateSku_(brand, parts) {
   fail_('A unique SKU could not be generated. Please try again.');
 }
 
-function currentPart_(sheet, data) {
-  const part = parts_(sheet).find(item => item.id === data.id);
+function currentPart_(sheet, data, records = parts_(sheet)) {
+  const part = records.find(item => item.id === data.id && !item.deleted);
   if (!part || part.revision !== data.revision) fail_('The part changed. Reopen it and try again.', 'STALE');
   return part;
 }
 
 function editPartInfo_(tenant, data) {
   const sheet = book_(tenant.sheetId);
-  const part = currentPart_(sheet, data);
+  const records = parts_(sheet, true);
+  const part = currentPart_(sheet, data, records);
   const stock = integer_(data.stock, 'On hand', 1000000);
   writePart_(sheet, {
     ...part,
-    name: text_(data.name, 'part name', 100),
+    name: uniqueName_(data.name, 'Part or consumable name', 100, records, part),
     threshold: integer_(data.threshold, 'Low-stock threshold', 1000000),
     stock, stockValue: prorate_(part.stockValue, part.stock, stock),
   }, null);
@@ -569,7 +586,8 @@ function receiptExists_(sheet, key) {
 }
 
 function writePart_(sheet, part, receipt) {
-  const { id, sku, name, supplier, threshold, revision, index, stock: before, stockValue: beforeValue } = part;
+  const { id, sku, name, threshold, revision, index, stock: before, stockValue: beforeValue } = part;
+  const supplier = receipt?.supplier || part.supplier;
   if (receipt && beforeValue === null) fail_('Set an opening unit cost for the remaining stock before restocking.');
   const stock = integer_(before + (receipt?.quantity || 0), 'Resulting stock', 1000000);
   const value = receipt ? beforeValue + receipt.value : beforeValue;
@@ -598,8 +616,10 @@ function purchaseHistory_(tenant, id) {
 function savePackage_(tenant, data) {
   const sheet = book_(tenant.sheetId);
   const tab = sheet.tab('Packages');
-  const previous = packages_(sheet).find(kit => kit.id === data.id);
+  const records = packages_(sheet, true);
+  const previous = records.find(kit => kit.id === data.id && !kit.deleted);
   if (data.id && (!previous || previous.revision !== data.revision)) fail_('The package changed. Reopen it and try again.', 'STALE');
+  const name = uniqueName_(data.name, 'Package name', 120, records, previous);
   if (!Array.isArray(data.components) || data.components.length < 1 || data.components.length > 40) fail_('Choose 1 to 40 components.');
   const parts = parts_(sheet);
   const consumableIds = new Set(parts.filter(part => part.consumable).map(part => part.id));
@@ -616,7 +636,7 @@ function savePackage_(tenant, data) {
   } else {
     recipe.push(...[...consumableIds].map(id => ({ id, quantity: 1 })));
   }
-  const row = [previous?.id || Utilities.getUuid(), text_(data.name, 'package name', 120),
+  const row = [previous?.id || Utilities.getUuid(), name,
     text_(data.description, 'description', 450, false), integer_(data.price, 'Price in centavos', 1000000000), JSON.stringify(recipe),
     previous?.photo || '', (previous?.revision || 0) + 1];
   if (data.photo) row[5] = createImage_(tenant, data.photo, 'package');
